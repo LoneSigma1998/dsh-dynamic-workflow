@@ -1,0 +1,290 @@
+/**
+ * The horizontal workflow timeline (ZCode's design, DSH tokens): one rail, phases as stations on
+ * it, subagents as pills hanging under their station, non-adjacent edges as arcs in the air above
+ * the rail, parallel phases as bands of branch tracks. Geometry and the model are ZCode's
+ * (`model/timeline/*`, ported verbatim); this file is only the renderer.
+ *
+ * While the model is still writing the script (draft), stations land one by one as the pen reaches
+ * them, the last one with a blinking caret.
+ */
+
+import { memo, useEffect, useId, useMemo, useRef } from 'react'
+import { StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
+import { laneDisplayName, type LaneNameFormatter } from './model/graph/lane-name.ts'
+import { phaseDisplayName } from './model/graph/phase-name.ts'
+import { pillStatusOf, rosterMore, stationRosterOf, ROSTER_DECK, ROSTER_PINS_CARD } from './model/timeline/roster-model.ts'
+import {
+  ARC_BASE,
+  ARC_LANE,
+  arcEnds,
+  arcTerminalOffsets,
+  bandAt,
+  bandForkX,
+  bandMergeX,
+  CAPTION_X,
+  lampX,
+  MARK_X,
+  PILL_GAP,
+  PILL_HEIGHT,
+  STATION_WIDTH,
+  stationX,
+  STUB,
+  TAIL,
+  timelineLayout,
+  timelineWidth,
+  type TimelineLayout,
+} from './model/timeline/timeline-geometry.ts'
+import type { TimelineBand, TimelineInk, TimelinePill, TimelineStation, WorkflowTimelineModel } from './model/timeline/timeline-model.ts'
+import type { Translate } from './host-types.ts'
+import { stepDot } from './run-view.ts'
+
+interface RailPiece { key: string; d: string; ink: TimelineInk; kind?: string }
+
+/** Rail pieces as SVG paths (port of ZCode `timelineRailPieces`). */
+function railPieces(model: Pick<WorkflowTimelineModel, 'bands' | 'rails' | 'stations'>, layout: TimelineLayout): RailPiece[] {
+  const { bands, rails, stations } = model
+  const { inset, rowY } = layout
+  const y0 = rowY[0]!
+  const rowOf = (track: number): number => rowY[track] ?? y0
+  const lx = (i: number): number => lampX(i, inset)
+  const trackOf = (i: number): number => stations[i]?.track ?? 0
+  const straight = (x1: number, x2: number, y: number): string => `M${x1},${y} H${x2}`
+  const forkPath = (band: TimelineBand, track: number, head: number): string => {
+    const xf = bandForkX(band, inset) - 8 * (track - 1)
+    const yt = rowOf(track)
+    return `M${xf},${y0} Q${xf + 8},${y0} ${xf + 8},${y0 - 8} V${yt + 8} Q${xf + 8},${yt} ${xf + 16},${yt} H${lx(head) - 8}`
+  }
+  const mergePath = (band: TimelineBand, track: number, tail: number): string => {
+    const xm = bandMergeX(band, inset) - 8 * (band.tracks.length - 1 - track)
+    const yt = rowOf(track)
+    return `M${lx(tail) + 8},${yt} H${xm - 8} Q${xm},${yt} ${xm},${yt + 8} V${y0 - 8} Q${xm},${y0} ${xm + 8},${y0}`
+  }
+  const pieces: RailPiece[] = []
+  for (const band of bands) {
+    const main = band.tracks[0]!
+    if (band.pred === undefined) {
+      const head = main.stations[0]!
+      pieces.push({ key: `tail:${band.from}`, d: straight(bandForkX(band, inset) - TAIL, lx(head) - 8, y0), ink: main.entry })
+      band.tracks.forEach((track, t) => {
+        if (t > 0) pieces.push({ key: `fork:${band.from}:${t}`, d: forkPath(band, t, track.stations[0]!), ink: track.entry })
+      })
+    }
+    if (band.join === undefined) {
+      const last = main.stations[main.stations.length - 1]!
+      pieces.push({ key: `stub:${band.to}`, d: straight(lx(last) + 8, bandMergeX(band, inset) + STUB, y0), ink: main.exit })
+      band.tracks.forEach((track, t) => {
+        if (t > 0) pieces.push({ key: `merge:${band.to}:${t}`, d: mergePath(band, t, track.stations[track.stations.length - 1]!), ink: track.exit })
+      })
+    }
+  }
+  for (const rail of rails) {
+    if (rail.kind === 'twin') continue
+    const key = `${rail.from}>${rail.to}`
+    if (rail.kind === 'fork') {
+      const band = bandAt(bands, rail.to)
+      if (band !== undefined) pieces.push({ key, d: forkPath(band, trackOf(rail.to), rail.to), ink: rail.ink, kind: 'fork' })
+      continue
+    }
+    if (rail.kind === 'merge') {
+      const band = bandAt(bands, rail.from)
+      if (band !== undefined) pieces.push({ key, d: mergePath(band, trackOf(rail.from), rail.from), ink: rail.ink, kind: 'merge' })
+      continue
+    }
+    const source = bandAt(bands, rail.from)
+    const target = bandAt(bands, rail.to)
+    if (source !== undefined && target !== undefined && source !== target) {
+      pieces.push({ key, d: straight(bandMergeX(source, inset), bandForkX(target, inset), y0), ink: rail.ink })
+      continue
+    }
+    const yt = rowOf(trackOf(rail.from))
+    pieces.push({ key, d: straight(lx(rail.from) + 8, lx(rail.to) - 8, yt), ink: rail.ink, ...rail.kind === undefined ? {} : { kind: rail.kind } })
+  }
+  return pieces
+}
+
+function arcPaths(model: WorkflowTimelineModel, layout: TimelineLayout): { key: string; d: string; ink: TimelineInk }[] {
+  const { arcs, bands, stations } = model
+  const terminals = arcTerminalOffsets(arcs, bands, stations)
+  const { inset, rowY } = layout
+  const rowOf = (track: number): number => rowY[track] ?? rowY[0]!
+  const trackOf = (index: number): number => stations[index]?.track ?? 0
+  return arcs.map((arc, j) => {
+    const { fromBand, toBand } = arcEnds(arc, bands, stations)
+    const source = bandAt(bands, arc.from)
+    const target = bandAt(bands, arc.to)
+    const ly = rowOf(arc.air) - ARC_BASE - ARC_LANE * arc.lane
+    const xa = fromBand && source !== undefined ? bandMergeX(source, inset) : lampX(arc.from, inset) + terminals.takeoff[j]!
+    const xb = toBand && target !== undefined ? bandForkX(target, inset) : lampX(arc.to, inset) + terminals.landing[j]!
+    const sign = xb < xa ? -1 : 1
+    const ya = fromBand ? rowY[0]! - 3 : rowOf(trackOf(arc.from)) - 7
+    const yb = toBand ? rowY[0]! - 4 : rowOf(trackOf(arc.to)) - 9
+    const d = `M${xa},${ya} V${ly + 8} Q${xa},${ly} ${xa + 8 * sign},${ly} H${xb - 8 * sign} Q${xb},${ly} ${xb},${ly + 8} V${yb}`
+    return { key: `${arc.from}-${arc.to}-${arc.air}`, d, ink: arc.ink }
+  })
+}
+
+export interface TimelineProps {
+  model: WorkflowTimelineModel
+  names: LaneNameFormatter
+  t: Translate
+  /** Open the transcript behind a pill (live runs only). */
+  onOpenPill?: ((pill: TimelinePill) => void) | undefined
+  /** Highest number of pills drawn per station before the "n more" row. */
+  pins?: number
+  /** Show at most this many pill rows (the card); the pane passes Infinity. */
+  maxPillRows?: number
+}
+
+function avatarHue(index: number | undefined): number {
+  return ((index ?? 0) * 47 + 200) % 360
+}
+
+function lampClass(station: TimelineStation): string {
+  const status = station.status ?? 'static'
+  return `dwf-lamp dwf-lamp-${status}${station.hole === undefined ? '' : ' dwf-lamp-hole'}${station.typing === true ? ' dwf-lamp-typing' : ''}`
+}
+
+export const Timeline = memo(function Timeline({ model, names, t, onOpenPill, pins = ROSTER_PINS_CARD, maxPillRows = 6 }: TimelineProps) {
+  const markerId = useId().replace(/[^\w-]/g, '')
+  const layout = useMemo(() => timelineLayout(model.arcs, model.bands), [model])
+  const geometry = useMemo(() => {
+    const rails = railPieces(model, layout)
+    const arcs = arcPaths(model, layout)
+    const listed = model.stations.map(station => {
+      const roster = stationRosterOf(station, pins)
+      const more = roster === undefined ? undefined : rosterMore(roster)
+      // a roster whose rest is empty (every pill pinned) has nothing behind its door
+      return { pills: roster === undefined ? station.pills : roster.pinned, more: more !== undefined && more.count > 0 ? more : undefined }
+    })
+    const rows = Math.min(maxPillRows, Math.max(0, ...listed.map(r => r.pills.length + (r.more === undefined ? 0 : 1))))
+    // Fit each station into `rows`: when pinned pills themselves overflow, the last row becomes
+    // the "n more" row and counts them too (never a "0 more", never a silently dropped pill).
+    const rosters = listed.map(({ pills, more }) => {
+      const overflow = more !== undefined || pills.length > rows
+      const visible = overflow ? pills.slice(0, Math.max(0, rows - 1)) : pills
+      const hidden = pills.slice(visible.length)
+      const row = !overflow ? undefined : {
+        count: hidden.length + (more?.count ?? 0),
+        deck: [...hidden, ...more?.deck ?? []].slice(0, ROSTER_DECK),
+        failed: hidden.filter(pill => pillStatusOf(pill) === 'failed').length + (more?.failed ?? 0),
+      }
+      return { visible, more: row }
+    })
+    return { rails, arcs, rosters, rows }
+  }, [model, layout, pins, maxPillRows])
+  const scroller = useRef<HTMLDivElement>(null)
+  // The newest running station: when the run advances past the visible width, bring it into view
+  // once (only on change, so a user scrolling back is left alone).
+  const focus = useMemo(() => {
+    for (let i = model.stations.length - 1; i >= 0; i -= 1) if (model.stations[i]!.status === 'running') return i
+    return -1
+  }, [model])
+  useEffect(() => {
+    const el = scroller.current
+    if (el === null || focus < 0) return
+    const left = stationX(focus, layout.inset)
+    const right = left + STATION_WIDTH
+    if (right > el.scrollLeft + el.clientWidth || left < el.scrollLeft) el.scrollTo({ left: Math.max(0, right - el.clientWidth + 12), behavior: 'smooth' })
+  }, [focus, layout.inset])
+  // Edge fades say "there is more this way" (scrollbars are hidden on overlay-scrollbar systems).
+  useEffect(() => {
+    const el = scroller.current
+    if (el === null) return
+    const update = (): void => {
+      const start = el.scrollLeft > 2
+      const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 2
+      const fade = start && end ? 'both' : start ? 'start' : end ? 'end' : ''
+      if (el.dataset.fade !== fade) el.dataset.fade = fade
+    }
+    update()
+    el.addEventListener('scroll', update, { passive: true })
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update)
+    observer?.observe(el)
+    if (el.firstElementChild !== null) observer?.observe(el.firstElementChild)
+    return () => { el.removeEventListener('scroll', update); observer?.disconnect() }
+  }, [model.stations.length === 0])
+  const count = model.stations.length
+  if (count === 0) return null
+  const width = timelineWidth(count, layout.inset, model.tailStub !== undefined)
+  const height = layout.pillsTop + geometry.rows * (PILL_HEIGHT + PILL_GAP)
+  const draft = model.draft !== undefined
+  return (
+    <div className="dwf-timeline-scroll" ref={scroller}>
+      <div className={`dwf-timeline${draft ? ' dwf-timeline-draft' : ''}`} style={{ width, height }}>
+        <svg aria-hidden className="dwf-timeline-svg" width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+          <defs>
+            {(['faint', 'strong'] as const).map(ink => (
+              <marker id={`${markerId}-${ink}`} key={ink} markerHeight="6" markerWidth="6" orient="auto-start-reverse" refX="7" refY="4" viewBox="0 0 8 8">
+                <path d="M0,0.5 L7,4 L0,7.5 Z" className={`dwf-ink-fill-${ink}`} />
+              </marker>
+            ))}
+          </defs>
+          {geometry.rails.map(piece => (
+            <path key={piece.key} d={piece.d} fill="none" className={`dwf-ink dwf-ink-${piece.ink}${piece.kind === 'stream' ? ' dwf-ink-stream' : ''}`} />
+          ))}
+          {geometry.arcs.map(arc => (
+            <path key={arc.key} d={arc.d} fill="none" className={`dwf-ink dwf-ink-${arc.ink} dwf-arc`} markerEnd={`url(#${markerId}-${arc.ink === 'march' ? 'strong' : arc.ink})`} />
+          ))}
+          {layout.banded && model.stations.map((station, i) => station.track === 0 ? null : (
+            <path key={`leader:${station.id}`} d={`M${lampX(i, layout.inset)},${(layout.rowY[station.track] ?? layout.rowY[0]!) + 7} V${layout.capY - 10}`} className="dwf-leader" fill="none" />
+          ))}
+        </svg>
+        {model.stations.map((station, i) => {
+          const x = stationX(i, layout.inset)
+          const lampY = layout.rowY[station.track] ?? layout.rowY[0]!
+          const name = phaseDisplayName(station.naming, names)
+          const captionY = layout.banded ? layout.capY : lampY
+          const roster = geometry.rosters[i]!
+          const visible = roster.visible
+          return (
+            <div key={station.id} className="dwf-station" data-status={station.status ?? 'static'} style={{ left: x, width: STATION_WIDTH }}>
+              <span aria-hidden className={lampClass(station)} style={{ left: lampX(i, layout.inset) - x - 5, top: lampY - 5 }} />
+              <div className="dwf-station-caption" style={{ top: captionY - 10, left: layout.banded ? CAPTION_X : MARK_X + 7 }} title={name}>
+                <span className="dwf-station-name">{name}</span>
+                {station.typing === true ? <span className="dwf-caret" aria-hidden /> : null}
+                {station.rounds > 1 && station.onLoop ? <span className="dwf-station-meta">⟳ {station.rounds}</span> : null}
+                {station.fraction !== undefined && station.fraction.observed > 1 ? <span className="dwf-station-meta">{station.fraction.settled}/{station.fraction.observed}</span> : null}
+                {station.hole !== undefined ? <span className="dwf-station-meta dwf-hole-type">{station.hole.state === 'waiting' ? '…' : '✓'}</span> : null}
+              </div>
+              {visible.map((pill, k) => (
+                <Pill key={pill.key} pill={pill} names={names} t={t} top={layout.pillsTop + k * (PILL_HEIGHT + PILL_GAP)} onOpen={onOpenPill} />
+              ))}
+              {roster.more !== undefined ? (
+                <div className="dwf-pill dwf-pill-more" style={{ top: layout.pillsTop + visible.length * (PILL_HEIGHT + PILL_GAP) }}>
+                  <span className="dwf-deck">
+                    {roster.more.deck.map(pill => <span key={pill.key} className="dwf-avatar dwf-avatar-small" style={{ ['--dwf-hue' as string]: avatarHue(pill.avatarIndex) }} />)}
+                  </span>
+                  <span className="dwf-pill-name">{t('pill.more', { count: roster.more.count })}</span>
+                  {roster.more.failed > 0 ? <span className="dwf-pill-failed">{t('pill.moreFailed', { count: roster.more.failed })}</span> : null}
+                </div>
+              ) : null}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+})
+
+function Pill({ pill, names, t, top, onOpen }: { pill: TimelinePill; names: LaneNameFormatter; t: Translate; top: number; onOpen?: ((pill: TimelinePill) => void) | undefined }) {
+  const name = pill.runtimeName ?? laneDisplayName(pill.lane, names)
+  const openable = onOpen !== undefined && pill.instance?.sessionId !== undefined
+  const initial = Array.from(name.trim())[0]?.toUpperCase() ?? '·'
+  const body = (
+    <>
+      {pill.laneClass === 'workspace'
+        ? <span className="dwf-avatar dwf-avatar-script" aria-hidden>{'{ }'}</span>
+        : <span className="dwf-avatar" aria-hidden style={{ ['--dwf-hue' as string]: avatarHue(pill.avatarIndex) }}>{initial}</span>}
+      <span className="dwf-pill-name" title={name}>{name}</span>
+      {pill.asking === true ? <span className="dwf-pill-asking" aria-hidden>?</span> : null}
+      {pill.status === undefined ? null : <StateDot state={stepDot(pill.status)} size={12} />}
+    </>
+  )
+  return openable
+    ? (
+      <button type="button" className="dwf-pill dwf-pill-button" data-status={pill.status ?? 'static'} style={{ top }} onClick={() => onOpen!(pill)} aria-label={t('pill.open', { name })}>
+        {body}
+      </button>
+    )
+    : <div className="dwf-pill" data-status={pill.status ?? 'static'} style={{ top }}>{body}</div>
+}

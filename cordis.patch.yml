@@ -1,0 +1,14 @@
+# Installs the plugin into the active profile: the Host half (lib/index.js —
+# tools, runtime, journal, routes, projection) and, because the package
+# declares `dsh.client.platform: web` with a `./client` export, the Web half
+# (lib/client.js — tool cards, confirm card, run panel) from the same entry.
+#
+# DSH's own `workflow` tool (tool-workflow, saved YAML workflows) is a
+# different feature and stays enabled; the two do not share tool names.
+- insert:
+    - id: dynamic-workflow
+      name: 'dsh-dynamic-workflow'
+      config:
+        # ask: confirm every launch (Allow / Always allow in this session / Deny / Refine)
+        confirm: ask
+        skillGate: true

@@ -1,0 +1,10 @@
+node_modules/
+.env
+lib/
+vendor/dynamic-workflow/src/compiler/libs.generated.ts
+tests/preview/clsx-shim.ts
+.dsh/
+*.log
+.tmp/
+tsconfig.test.json
+tsconfig.typecheck-*.json

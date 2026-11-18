@@ -1,0 +1,518 @@
+/*
+ * dsh-dynamic-workflow Web styles. DSH semantic tokens only (`--dsw-alias-*`), so light, dark and
+ * macOS themes follow the shell. Timeline geometry mirrors ZCode's design canvas: stations 168px
+ * wide on a 192px pitch, the lamp at x+17, pills 32px tall with a 6px gap.
+ */
+
+/* ——— card ——— */
+.dwf-card {
+  --dwf-surface: var(--dsw-alias-bg-module-platform);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 10px 12px 12px;
+  border-radius: var(--dsw-radius-md, 12px);
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xs-13, 13px/20px sans-serif);
+  min-width: 0;
+}
+.dwf-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 28px;
+}
+.dwf-card-icon {
+  display: inline-flex;
+  color: var(--dsw-alias-label-secondary);
+  flex: none;
+}
+.dwf-card-kind {
+  color: var(--dsw-alias-label-tertiary);
+  flex: none;
+}
+.dwf-card-title {
+  flex: 0 1 auto;
+  min-width: 48px;
+  font: var(--dsw-font-xs-strong-13, 600 13px/20px sans-serif);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.dwf-card-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dsw-alias-label-secondary);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.dwf-card-status > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.dwf-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex: none;
+}
+/*
+ * Every item carries its own leading "·"; the box is pulled 14px left and clipped back at its
+ * true edge, so the separator of whichever item starts a line (the first, or one that wrapped)
+ * falls outside the clip. No line ever begins with a stray dot.
+ */
+.dwf-card-meta {
+  --dwf-sep: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  margin-left: calc(-1 * var(--dwf-sep));
+  clip-path: inset(-6px -6px -6px var(--dwf-sep));
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
+}
+.dwf-card-meta > * {
+  position: relative;
+  padding-left: var(--dwf-sep);
+}
+.dwf-card-meta > *::before {
+  content: '·';
+  position: absolute;
+  left: 0;
+  width: var(--dwf-sep);
+  text-align: center;
+}
+.dwf-muted { color: var(--dsw-alias-label-tertiary); }
+.dwf-attention {
+  margin: 0;
+  color: var(--dsw-alias-state-warn-label, var(--dsw-alias-label-secondary));
+  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
+}
+.dwf-feedback {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: var(--dsw-alias-bg-mask-1);
+  white-space: pre-wrap;
+}
+.dwf-diagnostics {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
+  color: var(--dsw-alias-state-error-primary);
+}
+.dwf-diagnostics code {
+  font-family: var(--ds-font-family-code, monospace);
+  color: var(--dsw-alias-label-tertiary);
+  margin-right: 4px;
+}
+.dwf-outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dwf-outcome-label {
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
+}
+.dwf-outcome pre,
+.dwf-error {
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
+  font-family: var(--ds-font-family-code, monospace);
+  color: var(--dsw-alias-label-secondary);
+}
+.dwf-outcome-error pre,
+.dwf-outcome-error,
+.dwf-error { color: var(--dsw-alias-state-error-primary); }
+.dwf-reports {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
+}
+.dwf-code {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  max-height: 320px;
+  overflow: auto;
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: var(--dsw-alias-markdown-code-block, var(--dsw-alias-bg-mask-1));
+  font-family: var(--ds-font-family-code, monospace);
+  font-size: var(--dsh-code-font-size, 12px);
+  line-height: 18px;
+  white-space: pre;
+  tab-size: 2;
+  color: var(--dsw-alias-label-primary);
+}
+.dwf-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-link);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+@media (hover: hover) {
+  .dwf-link:hover { text-decoration: underline dotted; text-underline-offset: 3px; }
+}
+.dwf-link:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, currentColor); border-radius: 2px; }
+
+/* ——— timeline ——— */
+.dwf-timeline-scroll {
+  flex: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dsw-alias-border-l2) transparent;
+  margin: 0 -4px;
+  padding: 0 4px 4px;
+  --dwf-fade: 28px;
+}
+.dwf-timeline-scroll[data-fade='end'] { mask-image: linear-gradient(to right, #000 calc(100% - var(--dwf-fade)), transparent); }
+.dwf-timeline-scroll[data-fade='start'] { mask-image: linear-gradient(to left, #000 calc(100% - var(--dwf-fade)), transparent); }
+.dwf-timeline-scroll[data-fade='both'] { mask-image: linear-gradient(to right, transparent, #000 var(--dwf-fade), #000 calc(100% - var(--dwf-fade)), transparent); }
+.dwf-timeline {
+  position: relative;
+  flex: none;
+}
+.dwf-timeline-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.dwf-ink { stroke-width: 1; }
+.dwf-ink-faint { stroke: var(--dsw-alias-border-l2); }
+.dwf-ink-strong { stroke: var(--dsw-alias-label-tertiary); }
+.dwf-ink-march {
+  stroke: var(--dsw-alias-state-business-primary);
+  stroke-dasharray: 4 3;
+  animation: dwf-march 0.9s linear infinite;
+}
+.dwf-ink-stream { stroke-dasharray: 2 3; }
+.dwf-ink-fill-faint { fill: var(--dsw-alias-border-l2); }
+.dwf-ink-fill-strong { fill: var(--dsw-alias-label-tertiary); }
+.dwf-leader { stroke: var(--dsw-alias-border-l2); stroke-dasharray: 1 2; stroke-linecap: round; }
+@keyframes dwf-march { to { stroke-dashoffset: -7; } }
+
+.dwf-station {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+.dwf-timeline-draft .dwf-station { animation: dwf-land 0.28s var(--ds-ease-in-out, ease-out) both; }
+@keyframes dwf-land { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+.dwf-lamp {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  corner-shape: round;
+  border: 1px solid var(--dsw-alias-label-tertiary);
+  background: var(--dwf-surface, var(--dsw-alias-bg-base));
+}
+.dwf-lamp-pending { border-color: var(--dsw-alias-border-l3, var(--dsw-alias-label-tertiary)); }
+.dwf-lamp-running {
+  border: 0;
+  background: var(--dsw-alias-state-business-primary);
+  box-shadow: 0 0 0 0 var(--dsw-alias-state-business-primary);
+  animation: dwf-pulse 1.6s var(--ds-ease-in-out, ease-in-out) infinite;
+}
+.dwf-lamp-done { border: 0; background: var(--dsw-alias-state-success-primary); }
+.dwf-lamp-failed { border: 0; background: var(--dsw-alias-state-error-primary); }
+.dwf-lamp-hole { border-style: dashed; background: var(--dwf-surface, transparent); }
+.dwf-lamp-typing { border-color: var(--dsw-alias-label-secondary); }
+@keyframes dwf-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--dsw-alias-state-business-primary) 45%, transparent); }
+  70% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--dsw-alias-state-business-primary) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* The caption sits on the rail row and masks the rail behind it: the rail reads as the rest of
+   the station header after the name (ZCode draws it as the header row's trailing border). */
+.dwf-station-caption {
+  position: absolute;
+  max-width: calc(100% - 28px);
+  height: 20px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 6px;
+  white-space: nowrap;
+  background: var(--dwf-surface, var(--dsw-alias-bg-base));
+}
+.dwf-station-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font: var(--dsw-font-xxs-strong-12, 600 12px/18px sans-serif);
+  color: var(--dsw-alias-label-primary);
+}
+.dwf-station[data-status='static'] .dwf-station-name,
+.dwf-station[data-status='pending'] .dwf-station-name { color: var(--dsw-alias-label-secondary); }
+.dwf-station-meta {
+  flex: none;
+  font: var(--dsw-font-xxxs-11, 11px/16px sans-serif);
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.dwf-caret {
+  display: inline-block;
+  width: 1px;
+  height: 12px;
+  margin-left: -4px;
+  background: var(--dsw-alias-label-primary);
+  animation: dwf-blink 1s steps(1) infinite;
+}
+@keyframes dwf-blink { 50% { opacity: 0; } }
+
+.dwf-pill {
+  position: absolute;
+  left: 0;
+  width: 168px;
+  height: 32px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 0 4px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 16px;
+  corner-shape: round;
+  background: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1));
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
+  text-align: left;
+}
+.dwf-pill[data-status='running'] { border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, transparent); }
+.dwf-pill[data-status='failed'] { border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 55%, transparent); }
+.dwf-pill[data-status='pending'] { color: var(--dsw-alias-label-secondary); }
+.dwf-pill-button { cursor: pointer; }
+@media (hover: hover) {
+  .dwf-pill-button:hover { background: var(--dsw-alias-card-fill-hover, var(--dsw-alias-interactive-bg-hover)); }
+}
+.dwf-pill-button:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, currentColor); outline-offset: 1px; }
+.dwf-pill-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dwf-pill-asking {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  font: var(--dsw-font-xxxs-strong-11, 600 11px/14px sans-serif);
+  color: var(--dsw-alias-label-on-color, #fff);
+  background: var(--dsw-alias-state-warn-primary, var(--dsw-alias-state-business-primary));
+}
+.dwf-pill-failed { flex: none; color: var(--dsw-alias-state-error-primary); }
+.dwf-pill-more { border-style: dashed; color: var(--dsw-alias-label-secondary); }
+.dwf-avatar {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  corner-shape: round;
+  display: inline-grid;
+  place-items: center;
+  font: var(--dsw-font-xxxs-strong-11, 600 11px/14px sans-serif);
+  color: hsl(var(--dwf-hue, 210) 50% 40%);
+  background: hsl(var(--dwf-hue, 210) 70% 60% / 0.18);
+}
+.dwf-avatar-script {
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-mask-2, var(--dsw-alias-bg-mask-1));
+  font-family: var(--ds-font-family-code, monospace);
+  font-size: 10px;
+}
+.dwf-avatar-small { width: 16px; height: 16px; margin-right: -6px; box-shadow: 0 0 0 1.5px var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1)); }
+.dwf-deck { display: inline-flex; padding-left: 4px; margin-right: 6px; }
+
+/* ——— script disclosure in the card ——— */
+.dwf-script-row { margin-top: -2px; }
+.dwf-script-row .dwf-muted, .dwf-fill .dwf-muted { margin-left: 8px; }
+
+/* ——— confirm card (composer seat) ——— */
+.dwf-confirm {
+  --dwf-surface: var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-base));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: var(--dsw-radius-lg, 16px);
+  corner-shape: round;
+  background: var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-base));
+  box-shadow: var(--dsw-elevation-panel, 0 2px 12px rgb(0 0 0 / 0.08));
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xs-13, 13px/20px sans-serif);
+  max-height: 70vh;
+  overflow: auto;
+}
+.dwf-confirm-head { display: flex; align-items: center; gap: 8px; }
+.dwf-confirm-title { margin: 0; font: var(--dsw-font-s-strong-14, 600 14px/22px sans-serif); }
+.dwf-confirm-script { max-height: 240px; }
+.dwf-confirm-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.dwf-refine { display: flex; flex-direction: column; gap: 8px; }
+.dwf-refine-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: var(--dsw-alias-bg-base, transparent);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+}
+.dwf-refine-input:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, currentColor); }
+
+/* ——— notice chip ——— */
+.dwf-notice { margin: 2px 0; }
+.dwf-notice-icon { display: inline-flex; color: var(--dsw-alias-label-tertiary); }
+.dwf-notice-summary { display: inline-flex; align-items: center; gap: 6px; min-width: 0; margin-left: 6px; color: var(--dsw-alias-label-tertiary); font: var(--dsw-font-xs-13, 13px/20px sans-serif); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dwf-notice-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-label-tertiary); }
+.dwf-notice-dot[data-tone='done'] { background: var(--dsw-alias-state-success-primary); }
+.dwf-notice-dot[data-tone='error'] { background: var(--dsw-alias-state-error-primary); }
+.dwf-notice-dot[data-tone='warning'] { background: var(--dsw-alias-state-warn-primary, var(--dsw-alias-state-business-primary)); }
+.dwf-notice-text { white-space: pre-wrap; max-height: 280px; }
+
+/* ——— run pane (right sidebar) ——— */
+.dwf-pane {
+  --dwf-surface: var(--dsw-alias-bg-base);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xs-13, 13px/20px sans-serif);
+  overflow: auto;
+  height: 100%;
+  box-sizing: border-box;
+}
+.dwf-pane-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dwf-pane-title { margin: 0; font: var(--dsw-font-s-strong-14, 600 14px/22px sans-serif); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dwf-pane-heading { margin: 0; font: var(--dsw-font-xs-strong-13, 600 13px/20px sans-serif); }
+.dwf-pane-section { display: flex; flex-direction: column; gap: 4px; }
+.dwf-pane-section h4 { margin: 0; font: var(--dsw-font-xxs-strong-12, 600 12px/18px sans-serif); color: var(--dsw-alias-label-secondary); }
+.dwf-plain-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.dwf-plain-list li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.dwf-roll { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+.dwf-roll-phase { display: flex; align-items: center; gap: 6px; font: var(--dsw-font-xxs-strong-12, 600 12px/18px sans-serif); color: var(--dsw-alias-label-secondary); }
+.dwf-roll-row { padding-left: 16px; font: var(--dsw-font-xxs-12, 12px/18px sans-serif); }
+.dwf-run-list { margin: 0; padding: 0; list-style: none; }
+.dwf-run-list-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .dwf-run-list-item:hover { background: var(--dsw-alias-interactive-bg-hover); }
+}
+.dwf-run-list-id { font-family: var(--ds-font-family-code, monospace); }
+
+@media (prefers-reduced-motion: reduce) {
+  .dwf-ink-march, .dwf-lamp-running, .dwf-caret, .dwf-timeline-draft .dwf-station { animation: none; }
+}
+
+/* long results stay compact on the run card */
+.dwf-outcome pre.dwf-clamped { max-height: 9.5em; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent); mask-image: linear-gradient(to bottom, #000 70%, transparent); }
+.dwf-outcome pre { max-height: 480px; }
+.dwf-more { align-self: flex-start; font: var(--dsw-font-xxs-12, 12px/18px sans-serif); }
+.dwf-pane-result { white-space: pre-wrap; word-break: break-word; max-height: none; }
+.dwf-retune { display: inline-flex; align-items: center; gap: 4px; }
+.dwf-step {
+  width: 18px; height: 18px; padding: 0; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 50%; corner-shape: round;
+  background: none; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xxs-12, 12px/16px sans-serif); line-height: 16px; cursor: pointer;
+}
+@media (hover: hover) { .dwf-step:hover { background: var(--dsw-alias-interactive-bg-hover); } }
+.dwf-step:disabled { opacity: 0.5; cursor: default; }
+
+/* editable run settings (confirmation card, Configure) */
+.dwf-settings { display: flex; flex-wrap: wrap; gap: 6px 16px; font: var(--dsw-font-xxs-12, 12px/18px sans-serif); color: var(--dsw-alias-label-secondary); }
+.dwf-setting { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; }
+.dwf-setting-label { color: var(--dsw-alias-label-tertiary); }
+.dwf-chip {
+  display: inline-flex; align-items: center; min-width: 24px; height: 22px; padding: 0 8px; justify-content: center;
+  border: 0.5px solid transparent; border-radius: 6px; background: var(--dwf-surface, var(--dsw-alias-bg-l2));
+  color: var(--dsw-alias-label-primary); font: inherit;
+}
+.dwf-select { max-width: 260px; padding-right: 4px; cursor: pointer; }
+@media (hover: hover) { .dwf-chip:hover { border-color: var(--dsw-alias-border-l2); } }
+.dwf-select:disabled { cursor: default; opacity: 0.6; }
+.dwf-setting-was { padding: 0; border: 0; background: none; color: var(--dsw-alias-label-tertiary); font: inherit; cursor: pointer; }
+@media (hover: hover) { .dwf-setting-was:hover { color: var(--dsw-alias-label-secondary); } }
+.dwf-configure { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 8px; }
+.dwf-configure-hint { margin: 0; font: var(--dsw-font-xxs-12, 12px/18px sans-serif); }
+
+/* artifacts */
+.dwf-artifact { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 8px; }
+.dwf-artifact + .dwf-artifact { margin-top: 6px; }
+.dwf-artifact-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; font: var(--dsw-font-xxs-12, 12px/18px sans-serif); }
+.dwf-artifact-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--dsw-font-xs-13, 13px/20px sans-serif); color: var(--dsw-alias-label-primary); text-align: left; }
+.dwf-artifact-badge { flex: none; padding: 0 6px; border-radius: 4px; background: var(--dwf-surface, var(--dsw-alias-bg-l2)); color: var(--dsw-alias-label-secondary); }
+.dwf-artifact-download { margin-left: auto; flex: none; }
+.dwf-artifact-body { max-height: 420px; overflow: auto; }
+.dwf-artifact-image { max-width: 100%; border-radius: 6px; }
+/* script steps */
+.dwf-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.dwf-step-row { display: flex; align-items: center; gap: 8px; min-width: 0; font: var(--dsw-font-xxs-12, 12px/20px sans-serif); }
+.dwf-step-kind { flex: none; width: 36px; color: var(--dsw-alias-label-tertiary); }
+.dwf-step-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-secondary); font-family: var(--dsw-font-family-mono, ui-monospace, monospace); }
+.dwf-artifact-strip { display: flex; flex-wrap: wrap; gap: 6px; }
+.dwf-artifact-chip { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; font: var(--dsw-font-xxs-12, 12px/18px sans-serif); }
+
+/* routing + saved workflows */
+.dwf-segmented { display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; background: var(--dwf-surface, var(--dsw-alias-bg-l2)); }
+.dwf-segment { padding: 2px 10px; border: 0; border-radius: 6px; background: none; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xxs-12, 12px/20px sans-serif); cursor: pointer; }
+.dwf-segment[data-active] { background: var(--dsw-alias-bg-l1, #fff); color: var(--dsw-alias-label-primary); box-shadow: 0 0 0 0.5px var(--dsw-alias-border-l2); }
+.dwf-saved-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.dwf-saved-item { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 8px; }
+.dwf-saved-head { display: flex; align-items: center; gap: 8px; }
+.dwf-saved-name { font: var(--dsw-font-xs-13, 13px/20px sans-serif); color: var(--dsw-alias-label-primary); }
+.dwf-saved-head > button, .dwf-saved-head > .dwf-button { margin-left: auto; }
+.dwf-saved-desc { margin: 0; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xxs-12, 12px/18px sans-serif); }
+.dwf-saved-args { display: flex; flex-direction: column; gap: 6px; }
+.dwf-input { width: 220px; justify-content: flex-start; }
+.dwf-saved-runs { list-style: none; margin: 0; padding: 0; }
+
+/* per-subagent changes */
+.dwf-changes-agent + .dwf-changes-agent { margin-top: 8px; }
+.dwf-changes-actor { font: var(--dsw-font-xs-13, 13px/20px sans-serif); }
+.dwf-change-row { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 2px 0; border: 0; background: none; text-align: left; cursor: pointer; font: var(--dsw-font-xxs-12, 12px/18px sans-serif); }
+.dwf-change-badge { flex: none; padding: 0 6px; border-radius: 4px; background: var(--dwf-surface, var(--dsw-alias-bg-l2)); color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xxs-12, 12px/18px sans-serif); }
+.dwf-diff-add { color: var(--dsw-alias-state-success-label, #1a7f37); }
+.dwf-diff-del { color: var(--dsw-alias-state-danger-label, #cf222e); }
+.dwf-diff { max-height: 420px; overflow: auto; font-size: 12px; line-height: 18px; }
+.dwf-diff-hunk { color: var(--dsw-alias-label-tertiary); }
+.dwf-diff-file { color: var(--dsw-alias-label-secondary); }
+.dwf-meta-link { font: inherit; }

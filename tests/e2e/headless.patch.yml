@@ -1,0 +1,34 @@
+# Manual live overlay for `dsh headless` (tests/e2e/run-live.mjs writes the same thing as JSON with
+# your paths filled in). Credentials never appear here: `apiKeyEnv` is resolved per request.
+#
+#   DWF_E2E_BASE_URL=http://host:port DWF_E2E_MODEL='provider/model' DWF_E2E_API_KEY=sk-… \
+#   dsh headless --patch ./tests/e2e/headless.patch.yml "用工作流审查 src/ 下的每个文件并汇总问题"
+
+- id: llm-pi-ai
+  config:
+    providers:
+      dwf-e2e:
+        api: anthropic-messages
+        apiKeyEnv: DWF_E2E_API_KEY
+        baseURL: !!js process.env.DWF_E2E_BASE_URL
+        models:
+          - id: !!js process.env.DWF_E2E_MODEL
+            maxTokens: 16384
+
+- id: agent-loop
+  config:
+    agents:
+      - id: main
+        provider: dwf-e2e
+        model: !!js process.env.DWF_E2E_MODEL
+        cwd: !!js process.cwd()
+
+- insert:
+    - id: dynamic-workflow
+      # absolute path of the built Host half; or install the package with `dsh plugin add` and
+      # replace this insert with `- id: dynamic-workflow` + the same config.
+      name: !!js process.env.DWF_PLUGIN_ENTRY
+      config:
+        confirm: never
+        holdTurnWhileRunning: true
+        skillGate: true

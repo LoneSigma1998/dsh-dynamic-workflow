@@ -1,0 +1,70 @@
+{
+  "name": "dsh-dynamic-workflow",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ZCode-style dynamic workflows for DeepSeek Harness: the model writes a typechecked TypeScript orchestration script; the harness confirms it, runs it with one DSH child agent per subagent, journals every step to SQLite (resume / amend / holes / escalations), and draws it as a live timeline.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/index.js.map",
+    "lib/client.js",
+    "lib/client.js.map",
+    "lib/index.js.LEGAL.txt",
+    "skills",
+    "cordis.patch.yml",
+    "README.md",
+    "NOTICE.md",
+    "vendor/LICENSE-ZCode-Apache-2.0"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    },
+    "manifestVersion": 1
+  },
+  "scripts": {
+    "gen-libs": "node vendor/dynamic-workflow/scripts/generate-libs.mjs",
+    "build": "node scripts/build.mjs",
+    "test:config": "node scripts/dsh-test-config.mjs",
+    "typecheck": "node scripts/typecheck.mjs",
+    "test": "node vendor/dynamic-workflow/scripts/generate-libs.mjs && node scripts/dsh-test-config.mjs && tsx --tsconfig tsconfig.test.json tests/smoke/engine-smoke.ts && tsx --tsconfig tsconfig.test.json tests/dsh/governor.ts && tsx --tsconfig tsconfig.test.json tests/dsh/hardening.ts && tsx --tsconfig tsconfig.test.json tests/dsh/quota-resume.ts && tsx --tsconfig tsconfig.test.json tests/dsh/snippet.ts && tsx --tsconfig tsconfig.test.json tests/dsh/tool-schema.ts && DWF_TEST_HOOK=1 tsx --tsconfig tsconfig.test.json tests/dsh/integration.ts && DWF_TEST_HOOK=1 tsx --tsconfig tsconfig.test.json tests/dsh/wire.ts && DWF_TEST_HOOK=1 tsx --tsconfig tsconfig.test.json tests/dsh/drafts.ts && DWF_TEST_HOOK=1 tsx --tsconfig tsconfig.test.json tests/dsh/amend-inflight.ts && DWF_TEST_HOOK=1 tsx --tsconfig tsconfig.test.json tests/dsh/budget.ts && DWF_TEST_HOOK=1 tsx --tsconfig tsconfig.test.json tests/dsh/modes.ts",
+    "test:bundle": "node scripts/build.mjs && node scripts/dsh-test-config.mjs && DWF_TEST_HOOK=1 DWF_PLUGIN=lib tsx --tsconfig tsconfig.test.json tests/dsh/integration.ts && DWF_TEST_HOOK=1 DWF_PLUGIN=lib tsx --tsconfig tsconfig.test.json tests/dsh/wire.ts",
+    "test:client": "node scripts/build.mjs --client-only && node scripts/dsh-test-config.mjs && mkdir -p .tmp && DWF_FIXTURE_DIR=.tmp DWF_TEST_HOOK=1 tsx --tsconfig tsconfig.test.json tests/dsh/integration.ts && tsx --tsconfig tsconfig.test.json tests/preview/make-fixtures.ts .tmp/run-main.json .tmp/fixtures.json && node tests/client/bundle-load.mjs .tmp/fixtures.json",
+    "preview": "node tests/preview/build-preview.mjs .tmp/fixtures.json .tmp/preview.html",
+    "test:live": "node tests/e2e/run-live.mjs",
+    "test:vendor": "node vendor/dynamic-workflow/scripts/generate-libs.mjs && vitest run --config vitest.vendor.config.mts && vitest run --config vitest.config.mts"
+  },
+  "engines": {
+    "node": ">=24.9.0",
+    "dsh": ">=0.2.2-rc.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-agent": "*",
+    "@deepseek-ai/dsh-llm": "*",
+    "@deepseek-ai/dsh-session": "*",
+    "@deepseek-ai/dsh-tools": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/react": "18.3.28",
+    "esbuild": "^0.25.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "tsx": "^4.20.0",
+    "typescript": "5.9.3",
+    "zod": "^4.4.3",
+    "vitest": "^4.1.5"
+  }
+}

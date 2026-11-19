@@ -40,6 +40,13 @@ import { compileOnce, type CompiledScript } from './compile.ts'
 import { buildImportedCache, preflightAmendImport, rebuildImportedCacheForResume, type ActorTranscriptStore } from './import.ts'
 import { toProgressPayload, type ProgressPayload } from './progress.ts'
 import type { ArtifactStore } from './artifacts.ts'
+import {
+  WORKFLOW_ARTIFACT_LIMITS,
+  type WorkflowRunArtifact,
+  type WorkflowRunArtifactKind,
+  type WorkflowRunArtifactVersion,
+} from '../shared/runs/workflow-artifacts.ts'
+import type { DwfArtifactItem } from '../journal/zcode/dwf-journal-artifacts.ts'
 
 const validateFn: ValidateFn = (schema, value) => validate(schema as JsonSchema, value)
 
@@ -354,9 +361,9 @@ export class RunService {
       : Math.max(1, Math.floor(input.maxConcurrency))
     const existingRow = input.resuming === true ? this.deps.journal.getRun(runId) : undefined
     const caps = { maxConcurrency: existingRow?.caps.maxConcurrency ?? maxConcurrency }
-    const subagentModel = input.subagentModel ?? this.parentModel(parent)
+    const subagentModel = this.resolveModelSpec(input.subagentModel, parent) ?? this.parentModel(parent)
     const launched = input.resuming === true ? this.readLaunch(runId) : undefined
-    const modelBindings = launched?.modelBindings ?? this.modelBindings(compiled, subagentModel)
+    const modelBindings = launched?.modelBindings ?? this.modelBindings(compiled, subagentModel, parent)
 
     const entry: LiveRun = {
       runId,
@@ -479,8 +486,108 @@ export class RunService {
     entry.settlement = settlement
     void settlement.then(
       result => this.onSettled(entry, result),
-      error => this.deps.logger?.warn('dynamic-workflow: run %s settlement rejected: %s', runId, String(error)),
+      (error) => {
+        this.live.delete(entry.runId)
+        if (entry.fenced !== true) this.deps.ownership?.release(entry.runId)
+        this.deps.delivery.wake(entry.parentSessionId)
+        this.deps.logger?.warn('dynamic-workflow: run %s settlement rejected: %s', runId, String(error))
+      },
     )
+  }
+
+  /** Provider names already authorized by a run's launch settings (subagentModel + modelBindings). */
+  launchedProviders(runId: string): Set<string> {
+    const providers = new Set<string>()
+    const add = (spec: string | undefined): void => {
+      if (spec === undefined) return
+      const slash = spec.indexOf('/')
+      if (slash > 0) providers.add(spec.slice(0, slash))
+    }
+    const launched = this.readLaunch(runId)
+    add(launched?.subagentModel)
+    for (const bound of Object.values(launched?.modelBindings ?? {})) add(bound)
+    return providers
+  }
+
+  /**
+   * Normalize a model spec (`provider/model[$effort]` or a bare `model[$effort]`):
+   * a bare name resolves inside the session's current provider (matching SKILL.md §16.1),
+   * never crossing providers unless `provider/model` is written explicitly.
+   */
+  resolveModelSpec(spec: string | undefined, parent: Agent): string | undefined {
+    if (spec === undefined) return undefined
+    const trimmed = spec.trim()
+    if (trimmed.length === 0) return undefined
+    if (trimmed.includes('/')) return trimmed
+    const parentProvider = this.parentModel(parent)?.split('/')[0]
+    return parentProvider === undefined ? trimmed : `${parentProvider}/${trimmed}`
+  }
+
+  /** Provider names that a candidate launch (compiled script + subagentModel) would invoke. */
+  candidateProviders(compiled: CompiledScript, subagentModel: string | undefined, parent: Agent): Set<string> {
+    const providers = new Set<string>()
+    const effectiveSubagent = this.resolveModelSpec(subagentModel, parent) ?? this.parentModel(parent)
+    const add = (spec: string | undefined): void => {
+      if (spec === undefined) return
+      const slash = spec.indexOf('/')
+      if (slash > 0) providers.add(spec.slice(0, slash))
+    }
+    add(effectiveSubagent)
+    const bindings = this.modelBindings(compiled, effectiveSubagent, parent)
+    for (const bound of Object.values(bindings ?? {})) add(bound)
+    return providers
+  }
+
+  /**
+   * Check declared model references and an explicit `subagentModel` against the Host's live model
+   * catalog (ZCode diagnostic 9011 parity). Bare model ids are resolved inside the session's
+   * provider first. Returns error lines when a model is unknown; skips silently when no provider
+   * catalog is populated (e.g. scripted unit-test adapters).
+   */
+  async validateModels(compiled: CompiledScript, subagentModel: string | undefined, parent: Agent): Promise<string[]> {
+    const llm = this.deps.ctx.get('llm' as never) as {
+      listProviders?(): { id: string }[]
+      listModels?(provider: string): Promise<{ id: string }[]>
+    } | undefined
+    if (llm?.listProviders === undefined || llm.listModels === undefined) return []
+    const providers = llm.listProviders()
+    const registeredProviders = new Set(providers.map(p => p.id))
+    const catalog = new Map<string, Set<string>>()
+    for (const provider of providers) {
+      try {
+        const models = await llm.listModels(provider.id)
+        if (models.length > 0) catalog.set(provider.id, new Set(models.map(m => m.id)))
+      } catch {
+        // skip providers that cannot list models
+      }
+    }
+    if (registeredProviders.size === 0) return []
+    const check = (label: string, spec: string): string | undefined => {
+      const slash = spec.indexOf('/')
+      if (slash <= 0 || slash === spec.length - 1) return `${label} "${spec}" must be in "provider/model" form (session has no active provider).`
+      const provider = spec.slice(0, slash)
+      const rest = spec.slice(slash + 1)
+      const dollar = rest.indexOf('$')
+      const modelId = dollar < 0 ? rest : rest.slice(0, dollar)
+      if (modelId.length === 0) return `${label} "${spec}" is missing a model id.`
+      if (!registeredProviders.has(provider)) return `${label} "${spec}" names unknown provider "${provider}".`
+      const known = catalog.get(provider)
+      if (known === undefined) return undefined // provider does not expose a static list
+      if (!known.has(modelId)) return `${label} "${spec}" is not available on provider "${provider}".`
+      return undefined
+    }
+    const errors: string[] = []
+    const normalizedSubagent = this.resolveModelSpec(subagentModel, parent)
+    if (normalizedSubagent !== undefined) {
+      const err = check('subagent_model', normalizedSubagent)
+      if (err !== undefined) errors.push(err)
+    }
+    const bindings = this.modelBindings(compiled, normalizedSubagent ?? this.parentModel(parent), parent)
+    for (const [ref, bound] of Object.entries(bindings ?? {})) {
+      const err = check(`model("${ref}")`, bound)
+      if (err !== undefined) errors.push(err)
+    }
+    return errors
   }
 
   private parentModel(parent: Agent): string | undefined {
@@ -491,10 +598,10 @@ export class RunService {
     return undefined
   }
 
-  /** Bind every `model("…")` the script names: `provider/model` literals bind to themselves; bare ids use the run's provider. */
-  private modelBindings(compiled: CompiledScript, subagentModel: string | undefined): Record<string, string> | undefined {
+  /** Bind every `model("…")` the script names: `provider/model` literals bind to themselves; bare ids use the run's or session's provider. */
+  private modelBindings(compiled: CompiledScript, subagentModel: string | undefined, parent?: Agent): Record<string, string> | undefined {
     if (compiled.modelReferences.length === 0) return undefined
-    const provider = subagentModel?.split('/')[0]
+    const provider = subagentModel?.includes('/') ? subagentModel.split('/')[0] : parent === undefined ? undefined : this.parentModel(parent)?.split('/')[0]
     const out: Record<string, string> = {}
     for (const name of compiled.modelReferences) {
       out[name] = name.includes('/') ? name : provider === undefined ? name : `${provider}/${name}`
@@ -564,7 +671,11 @@ export class RunService {
 
   private onSettled(entry: LiveRun, settlement: RunSettlement): void {
     this.live.delete(entry.runId)
-    if (entry.fenced === true) return // the new owner settles and notifies; never release its claim
+    if (entry.fenced === true) {
+      // Wake any hold-mode waiter so the owning turn does not hang after fencing.
+      this.deps.delivery.wake(entry.parentSessionId)
+      return // the new owner settles and notifies; never release its claim
+    }
     this.deps.ownership?.release(entry.runId)
     for (const listener of this.settledListeners) {
       try { listener({ runId: entry.runId }) } catch (error) { this.deps.logger?.warn('dynamic-workflow: settle listener failed: %s', String(error)) }
@@ -669,6 +780,89 @@ export class RunService {
     return { diff: unifiedDiff(path, contents.before, contents.after) }
   }
 
+  /**
+   * All published/declared user-facing artifacts of one run, grouped by id (version ascending),
+   * with tagged-report counts (`itemCount`) for preset dashboards (`chart` / `table` / `metrics` / `board`).
+   */
+  artifacts(runId: string): WorkflowRunArtifact[] {
+    const rows = this.deps.journal.listArtifactRows(runId)
+    const counts = this.deps.journal.countTaggedReports(runId)
+    const grouped = new Map<string, { kind: WorkflowRunArtifactKind; versions: WorkflowRunArtifactVersion[]; primary?: true }>()
+    for (const node of rows) {
+      if (node.status !== 'completed') continue
+      const record = node.result as {
+        id?: string; kind?: string; version?: number; title?: string; description?: string
+        contentType?: string; bytes?: number; uri?: string; sourcePath?: string; spec?: unknown
+        publishedAt?: number; primary?: boolean
+      } | undefined
+      if (record?.id === undefined || record.kind === undefined) continue
+      const kind = record.kind as WorkflowRunArtifactKind
+      const versionEntry: WorkflowRunArtifactVersion = {
+        version: record.version ?? 1,
+        publishedAt: record.publishedAt ?? 0,
+        ...record.title === undefined ? {} : { title: record.title },
+        ...record.description === undefined ? {} : { description: record.description },
+        ...record.contentType === undefined ? {} : { contentType: record.contentType },
+        ...record.bytes === undefined ? {} : { bytes: record.bytes },
+        ...record.uri === undefined ? {} : { uri: record.uri },
+        ...record.sourcePath === undefined ? {} : { sourcePath: record.sourcePath },
+        ...record.spec === undefined ? {} : { spec: record.spec },
+        ...record.primary === true ? { primary: true as const } : {},
+      }
+      const existing = grouped.get(record.id)
+      if (existing === undefined) {
+        grouped.set(record.id, { kind, versions: [versionEntry], ...record.primary === true ? { primary: true as const } : {} })
+      } else {
+        existing.versions.push(versionEntry)
+        if (record.primary === true) existing.primary = true
+      }
+    }
+    const out: WorkflowRunArtifact[] = []
+    for (const [id, entry] of grouped) {
+      entry.versions.sort((a, b) => a.version - b.version)
+      const latest = entry.versions[entry.versions.length - 1]!
+      out.push({
+        id,
+        kind: entry.kind,
+        version: latest.version,
+        versions: entry.versions,
+        itemCount: counts.get(id) ?? 0,
+        ...latest.title === undefined ? {} : { title: latest.title },
+        ...latest.description === undefined ? {} : { description: latest.description },
+        ...latest.contentType === undefined ? {} : { contentType: latest.contentType },
+        ...latest.sourcePath === undefined ? {} : { sourcePath: latest.sourcePath },
+        ...latest.spec === undefined ? {} : { spec: latest.spec },
+        ...entry.primary === true ? { primary: true as const } : {},
+      })
+    }
+    return out
+  }
+
+  /** Paged tagged `report(item, artifactId)` items feeding a preset dashboard artifact. */
+  artifactData(
+    runId: string,
+    artifactId: string,
+    options: { afterSequence?: number; limit?: number; fields?: readonly string[] } = {},
+  ): { items: DwfArtifactItem[]; hasMore: boolean } {
+    const rawLimit = options.limit ?? WORKFLOW_ARTIFACT_LIMITS.defaultItemsPerPage
+    const limit = Math.max(1, Math.min(WORKFLOW_ARTIFACT_LIMITS.maxItemsPerPage, Math.floor(rawLimit)))
+    const fields = options.fields === undefined || options.fields.length === 0
+      ? undefined
+      : options.fields
+        .filter(path => typeof path === 'string' && path.length > 0 && path.length <= WORKFLOW_ARTIFACT_LIMITS.maxFieldPathLength)
+        .slice(0, WORKFLOW_ARTIFACT_LIMITS.maxFieldsPerRequest)
+    return this.deps.journal.listArtifactItems(runId, artifactId, {
+      ...options.afterSequence !== undefined && Number.isFinite(options.afterSequence) && options.afterSequence >= 0
+        ? { afterSequence: Math.floor(options.afterSequence) }
+        : {},
+      limit,
+      maxBytes: WORKFLOW_ARTIFACT_LIMITS.maxPageBytes,
+      ...fields !== undefined && fields.length > 0
+        ? { fields: { paths: fields, maxValueBytes: WORKFLOW_ARTIFACT_LIMITS.maxFieldValueBytes } }
+        : {},
+    })
+  }
+
   /** The published record of one artifact version (content type for the download route). */
   artifactMeta(runId: string, id: string, version: number): { contentType?: string; kind?: string } | undefined {
     const journal = this.deps.journal as unknown as { listArtifactRows?(runId: string): { result?: unknown }[] }
@@ -748,7 +942,7 @@ export class RunService {
     const nodes = journal.listNodes(runId, { kinds: ['ask', 'world-read', 'world-run'], withResult: false })
     const reportEvents = journal.listEvents(runId, { types: ['report'], reportItems: 'all', limit: 64 })
     const reportCount = journal.countNodes(runId, 'report')
-    const artifacts = journal.listArtifactRows?.(runId) ?? []
+    const artifacts = this.artifacts(runId)
     const actors = journal.listActors(runId, { withPersona: false } as never)
     const logs = journal.listRecentLogEvents?.(runId, 20) ?? []
     const counts = { queued: 0, running: 0, completed: 0, failed: 0 }
@@ -774,14 +968,18 @@ export class RunService {
         count: reportCount,
         preview: reportEvents.flatMap(({ event }) => event.type === 'report' ? [boundedJson(event.item, 500)] : []).slice(0, 8),
       },
-      artifacts: artifacts.flatMap((node) => {
-        const record = node.result as { id: string; kind: string; title?: string; primary?: true; version?: number; contentType?: string; bytes?: number } | undefined
-        return record === undefined ? [] : [{
-          id: record.id, kind: record.kind, ...record.title === undefined ? {} : { title: record.title }, primary: record.primary === true, version: record.version ?? 1,
-          ...record.contentType === undefined ? {} : { contentType: record.contentType },
-          ...record.bytes === undefined ? {} : { bytes: record.bytes },
-        }]
-      }),
+      artifacts: artifacts.map(item => ({
+        id: item.id,
+        kind: item.kind,
+        ...item.title === undefined ? {} : { title: item.title },
+        ...item.description === undefined ? {} : { description: item.description },
+        primary: item.primary === true,
+        version: item.version,
+        ...item.contentType === undefined ? {} : { contentType: item.contentType },
+        ...item.versions[item.versions.length - 1]?.bytes === undefined ? {} : { bytes: item.versions[item.versions.length - 1]!.bytes },
+        ...item.spec === undefined ? {} : { spec: item.spec },
+        itemCount: item.itemCount,
+      })),
       pendingQuestions: this.pendingQuestions(runId),
       openHoles: this.openHoles(runId),
       logTail: logs.flatMap(({ event }) => event.type === 'log' ? [event.message] : []),
@@ -850,11 +1048,12 @@ export class RunService {
       if (this.live.has(row.runId)) continue
       // Another Host sharing this DSH_HOME is executing it: not an orphan.
       if (this.deps.ownership?.ownedElsewhere(row.runId) === true) continue
-      if (row.parentSessionId !== undefined) this.orphans.set(row.parentSessionId, [...this.orphans.get(row.parentSessionId) ?? [], row.runId])
-      this.deps.journal.updateRunStatus(row.runId, 'stopped', {
-        stopReason: 'interrupted',
-        failure: { code: 'Interrupted', message: `dynamic workflow run ${row.runId} was interrupted: the owning process exited before the run settled` } as never,
+      const updated = this.deps.journal.markInterruptedIfNonTerminal(row.runId, {
+        code: 'Interrupted',
+        message: `dynamic workflow run ${row.runId} was interrupted: the owning process exited before the run settled`,
       })
+      if (!updated) continue
+      if (row.parentSessionId !== undefined) this.orphans.set(row.parentSessionId, [...this.orphans.get(row.parentSessionId) ?? [], row.runId])
       count += 1
     }
     return count
@@ -886,7 +1085,7 @@ export interface RunSnapshot {
   nodes: { queued: number; running: number; completed: number; failed: number }
   actors: { siteId: string; ordinal: number; name?: string; sessionId?: string }[]
   reports: { count: number; preview: string[] }
-  artifacts: { id: string; kind: string; title?: string; primary: boolean; version: number }[]
+  artifacts: { id: string; kind: string; title?: string; description?: string; primary: boolean; version: number; contentType?: string; bytes?: number; spec?: unknown; itemCount?: number }[]
   pendingQuestions: PendingQuestion[]
   openHoles: { siteId: string; ordinal: number; name: string }[]
   logTail: string[]

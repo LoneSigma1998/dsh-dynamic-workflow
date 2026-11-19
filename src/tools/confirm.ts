@@ -39,11 +39,17 @@ export type ConfirmDecision =
   | { kind: 'refine'; feedback: string }
 
 export interface ConfirmRequest {
-  tool: 'create_workflow' | 'amend_workflow' | 'fill_workflow_hole'
+  tool: 'create_workflow' | 'amend_workflow' | 'fill_workflow_hole' | 'eval_workflow_snippet' | 'save_workflow'
   name: string
   scriptText: string
   display: WorkflowLaunchDisplay
   settings: { maxConcurrency: number; subagentModel?: string }
+  /** Whether "Always allow in this session" is offered and honored (default true; false for `save_workflow` and `eval_workflow_snippet`). */
+  allowAlways?: boolean
+  /** Literal `world.run` commands declared by a snippet (shown on the confirmation card). */
+  commands?: readonly string[]
+  /** Target metadata for `save_workflow` confirmations. */
+  saveTarget?: { scope: 'project' | 'global'; path: string; description: string; overwrites: boolean }
 }
 
 /** The launch a session is being asked to confirm (the Web card reads it over HTTP). */
@@ -53,6 +59,9 @@ export interface PendingLaunch {
   scriptText: string
   display: WorkflowLaunchDisplay
   settings: ConfirmRequest['settings']
+  allowAlways?: boolean
+  commands?: readonly string[]
+  saveTarget?: ConfirmRequest['saveTarget']
   askedAt: number
 }
 
@@ -73,29 +82,55 @@ export class LaunchConfirmation {
 
   async confirm(agent: Agent, request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmDecision> {
     const mode = this.mode()
-    if (mode === 'never' || this.alwaysAllowed.has(agent.id as string)) return { kind: 'allow' }
+    const allowAlways = request.allowAlways !== false
+    if (mode === 'never' || (allowAlways && this.alwaysAllowed.has(agent.id as string))) return { kind: 'allow' }
     const questions = this.ctx.get('userQuestions') as { ask?: (request: unknown) => Promise<{ answers: { id: string; selected: string[]; custom?: string }[] }> } | undefined
     if (questions?.ask === undefined) {
       return mode === 'ask-or-allow' ? { kind: 'allow' } : { kind: 'deny' }
     }
     let answer: { answers: { id: string; selected: string[]; custom?: string }[] }
     const sessionId = agent.id as string
-    this.pending.set(sessionId, { tool: request.tool, name: request.name, scriptText: request.scriptText, display: request.display, settings: request.settings, askedAt: Date.now() })
+    this.pending.set(sessionId, {
+      tool: request.tool,
+      name: request.name,
+      scriptText: request.scriptText,
+      display: request.display,
+      settings: request.settings,
+      ...allowAlways ? {} : { allowAlways: false },
+      ...request.commands === undefined ? {} : { commands: request.commands },
+      ...request.saveTarget === undefined ? {} : { saveTarget: request.saveTarget },
+      askedAt: Date.now(),
+    })
+    const header = request.tool === 'amend_workflow'
+      ? 'Amend workflow'
+      : request.tool === 'eval_workflow_snippet'
+        ? 'Run workflow snippet'
+        : request.tool === 'save_workflow'
+          ? 'Save workflow'
+          : 'Run workflow'
+    const question = request.tool === 'amend_workflow'
+      ? `Amend the workflow "${request.name}"?`
+      : request.tool === 'eval_workflow_snippet'
+        ? `Run workflow snippet with commands (${(request.commands ?? []).join(', ')})?`
+        : request.tool === 'save_workflow'
+          ? `Save the workflow "${request.name}"?`
+          : `Run the workflow "${request.name}"?`
+    const options = [
+      { label: CONFIRM_LABELS.allow, description: request.tool === 'save_workflow' ? 'Save it once.' : 'Run it once.' },
+      ...allowAlways ? [{ label: CONFIRM_LABELS.always, description: 'Do not ask again for workflows in this session.' }] : [],
+      { label: CONFIRM_LABELS.deny, description: request.tool === 'save_workflow' ? 'Do not save it.' : 'Do not run it.' },
+      ...request.tool === 'save_workflow' ? [] : [{ label: CONFIRM_LABELS.refine, description: 'Do not run it; tell the agent what to change.' }],
+    ]
     try {
       answer = await questions.ask({
         agent,
         signal,
         questions: [{
           id: CONFIRM_QUESTION_ID,
-          header: request.tool === 'amend_workflow' ? 'Amend workflow' : 'Run workflow',
-          question: request.tool === 'amend_workflow' ? `Amend the workflow "${request.name}"?` : `Run the workflow "${request.name}"?`,
+          header,
+          question,
           detail: renderDetail(request),
-          options: [
-            { label: CONFIRM_LABELS.allow, description: 'Run it once.' },
-            { label: CONFIRM_LABELS.always, description: 'Do not ask again for workflows in this session.' },
-            { label: CONFIRM_LABELS.deny, description: 'Do not run it.' },
-            { label: CONFIRM_LABELS.refine, description: 'Do not run it; tell the agent what to change.' },
-          ],
+          options,
         }],
       })
     } catch (error) {
@@ -109,7 +144,7 @@ export class LaunchConfirmation {
     const selected = item?.selected[0]
     const custom = item?.custom?.trim()
     const settings = custom?.startsWith(SETTINGS_ANSWER_PREFIX) === true ? parseSettings(custom.slice(SETTINGS_ANSWER_PREFIX.length)) : undefined
-    if (selected === CONFIRM_LABELS.always) {
+    if (selected === CONFIRM_LABELS.always && allowAlways) {
       this.alwaysAllowed.add(agent.id as string)
       return { kind: 'allow', always: true, ...settings === undefined ? {} : { settings } }
     }
@@ -138,6 +173,30 @@ export function parseSettings(text: string): ConfirmSettings | undefined {
 }
 
 function renderDetail(request: ConfirmRequest): string {
+  if (request.tool === 'eval_workflow_snippet') {
+    const cmds = (request.commands ?? []).map(cmd => `\`${cmd}\``).join(', ')
+    return [
+      `**Workflow snippet** — executes host commands via \`world.run\`: ${cmds || '(none)'}`,
+      '',
+      '```ts',
+      request.scriptText.trim(),
+      '```',
+      '',
+      'Pick **Refine** or type in **Other** to tell the agent what to change instead of running it.',
+    ].join('\n')
+  }
+  if (request.tool === 'save_workflow' && request.saveTarget !== undefined) {
+    const t = request.saveTarget
+    return [
+      `**${request.name}** (${t.scope}${t.overwrites ? ' — overwrites existing file' : ''})`,
+      `Target: \`${t.path}\``,
+      ...t.description === '' ? [] : ['', t.description],
+      '',
+      '```ts',
+      request.scriptText.trim(),
+      '```',
+    ].join('\n')
+  }
   const graph = request.display.causalityGraph
   const phases = graph?.phases?.map(phase => phase.name ?? phase.id) ?? []
   const agents = graph?.lanes.filter(lane => lane.id !== 'workspace' && lane.id !== 'unknown').length ?? 0

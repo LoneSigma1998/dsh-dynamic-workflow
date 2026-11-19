@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "动态工作流",
+    "description": "面向 DeepSeek Harness 的强类型 TypeScript 多代理工作流编排插件：支持并行子代理、SQLite 日志断点续跑与修订、中途留白补全、右侧栏竖向 Spine 视图，以及折线图/表格/指标/看板实时预设产物。输入 /workflow 或直接让代理“用工作流”启动。"
+  }
+}

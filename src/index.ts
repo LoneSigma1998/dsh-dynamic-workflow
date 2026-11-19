@@ -107,6 +107,15 @@ export function apply(ctx: Context, config: Config = {}): void {
   const stateDir = config.stateDir ?? join(dshHome(), 'state', 'dynamic-workflow')
   mkdirSync(stateDir, { recursive: true })
   const db = openJournalDatabase(join(stateDir, 'journal.sqlite'))
+  try {
+    applyWithDatabase(ctx, config, stateDir, db)
+  } catch (error) {
+    try { db.close() } catch { /* already closed */ }
+    throw error
+  }
+}
+
+function applyWithDatabase(ctx: Context, config: Config, stateDir: string, db: ReturnType<typeof openJournalDatabase>): void {
   const journal = createSqliteJournal(db)
   const escalations = createEscalationRegistry()
   const artifacts = createArtifactStore(join(stateDir, 'artifacts'))
@@ -277,6 +286,10 @@ export function apply(ctx: Context, config: Config = {}): void {
           return { kind: 'success', text: rows.length === 0 ? 'No workflow runs in this session.' : rows.map(row => `${row.runId}  ${row.status}${row.stopReason === undefined ? '' : `(${row.stopReason})`}  ${row.name}`).join('\n') }
         }
         if (runId === undefined) return { kind: 'error', text: 'Usage: /dwf stop <run_id> | /dwf resume <run_id>' }
+        const owner = service.journal.getRun(runId)?.parentSessionId
+        if (owner !== undefined && owner !== (invocation.agent.id as string)) {
+          return { kind: 'error', text: `Run ${runId} belongs to another session; only the session that started it can control it.` }
+        }
         if (verb === 'stop') {
           const result = service.cancel(runId, 'user')
           return result.ok ? { kind: 'success', text: result.message } : { kind: 'error', text: result.message }
@@ -298,7 +311,7 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   ctx.effect(() => () => {
     delivery.dispose()
-    void service.close().finally(() => {
+    return service.close().finally(() => {
       try { db.close() } catch { /* already closed */ }
     })
   })
@@ -366,12 +379,9 @@ async function readSessionEvents(ctx: Context, sessionId: string): Promise<reado
   return events
 }
 
-let buildForkSeedImpl: ((events: readonly SessionEvent[], boundary: number) => SessionEvent[]) | undefined
-
 /**
- * Minimal fork seed when `@deepseek-ai/dsh-session/fork` cannot be resolved from the plugin:
- * the inclusive prefix plus the inherited `session/end-seed` marker. Workflow seeds are cut at
- * exchange boundaries (after `turn/end`), so the prefix has no open turn to close.
+ * Minimal fork seed when `@deepseek-ai/dsh-session`'s `buildForkSeed` cannot be resolved from the
+ * Host's module graph: the inclusive prefix plus the inherited `session/end-seed` marker.
  */
 function localForkSeed(events: readonly SessionEvent[], boundary: number): SessionEvent[] {
   const prefix = events.slice(0, boundary + 1)
@@ -381,16 +391,9 @@ function localForkSeed(events: readonly SessionEvent[], boundary: number): Sessi
 }
 
 function forkSeed(_ctx: Context, events: readonly SessionEvent[], boundary: number): SessionEvent[] {
-  return (buildForkSeedImpl ?? localForkSeed)(events, boundary)
+  return (hostModules()?.buildForkSeed ?? localForkSeed)(events, boundary)
 }
 
 export async function loadForkSeedBuilder(): Promise<void> {
-  try {
-    const specifier = '@deepseek-ai/dsh-session/fork'
-    const module = await import(specifier) as { buildForkSeed: typeof buildForkSeedImpl }
-    buildForkSeedImpl = module.buildForkSeed
-  } catch {
-    buildForkSeedImpl = undefined
-  }
+  await loadHostModules()
 }
-void loadForkSeedBuilder()

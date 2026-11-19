@@ -250,7 +250,9 @@ export function globToRegExp(pattern: string): RegExp {
     } else if (char === '[') {
       const end = normalized.indexOf(']', i)
       if (end > i) {
-        source += normalized.slice(i, end + 1)
+        const inner = normalized.slice(i + 1, end)
+        // glob `[!…]` negates the character class, which RegExp spells `[^…]`
+        source += inner.startsWith('!') ? `[^${inner.slice(1)}]` : `[${inner}]`
         i = end + 1
         continue
       }

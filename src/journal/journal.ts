@@ -7,6 +7,7 @@
 import { uptime } from 'node:os'
 import type { DatabaseSync } from 'node:sqlite'
 import type { RunRecord } from '@zcode/dynamic-workflow'
+import { decodeRun, encodeRunSettlement, type DwfRunRow } from './zcode/dwf-journal-codecs.ts'
 import { SqliteDwfJournalStore } from './zcode/dwf-journal.ts'
 
 export class SqliteJournal extends SqliteDwfJournalStore {
@@ -34,13 +35,24 @@ export class SqliteJournal extends SqliteDwfJournalStore {
     }))
   }
 
-  /** Every run left non-terminal by a dead process (any owner). */
+  /** Every run left non-terminal by a dead process (any owner), read atomically in one query. */
   listNonTerminalRunsAll(): RunRecord[] {
-    const ids = this.db.prepare(`select id from dwf_run where status not in ('completed','failed','cancelled') order by id`).all() as { id: string }[]
-    return ids.flatMap(({ id }) => {
-      const run = this.getRun(id)
-      return run === undefined ? [] : [run]
-    })
+    const rows = this.db
+      .prepare(`select * from dwf_run where status not in ('completed','failed','cancelled') order by id`)
+      .all() as unknown as DwfRunRow[]
+    return rows.map(decodeRun)
+  }
+
+  /**
+   * Atomically mark an orphaned non-terminal run as `stopped(interrupted)` only if it is still
+   * non-terminal in SQLite (prevents a concurrent Host from having its completed status overwritten).
+   */
+  markInterruptedIfNonTerminal(runId: string, failure: { code: string; message: string }): boolean {
+    const encoded = encodeRunSettlement('stopped', { stopReason: 'interrupted', failure: failure as never })
+    const { changes } = this.db
+      .prepare(`update dwf_run set status = ?, failure_json = ?, time_updated = ? where id = ? and status not in ('completed','failed','cancelled')`)
+      .run(encoded.status, encoded.failureJson, Date.now(), runId)
+    return changes > 0
   }
 }
 

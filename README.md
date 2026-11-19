@@ -10,13 +10,36 @@ ZCode 的纯逻辑（编译器、分析器、引擎、沙箱，约 2.6 万行，
 
 需要 Node ≥ 24.9 与 DSH ≥ 0.2.2-rc.3。
 
+### 方式一：从 GitHub Packages 安装（推荐）
+
+首次安装前，在 `~/.npmrc` 配置 GitHub Packages（需带 `read:packages` 权限的 GitHub PAT）：
+
+```ini
+@lonesigma1998:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=你的_GITHUB_PAT
+```
+
+然后直接按包名安装：
+
+```sh
+dsh plugin --profile web add @lonesigma1998/dsh-dynamic-workflow        # 或 --profile headless / tui
+```
+
+Desktop 桌面端在左侧栏 **Plugins → Add plugin** 中输入 `@lonesigma1998/dsh-dynamic-workflow` 即可安装，后续也支持在 Plugin Manager 内检测版本并一键更新。
+
+### 方式二：本地源码构建安装
+
 ```sh
 npm install            # 只装构建/测试依赖（esbuild、typescript 5.9、zod、tsx…）
 npm run build          # → lib/index.js（Host 半，TypeScript 编译器已打包进去）+ lib/client.js（Web 半）
-dsh plugin --profile web add "$(pwd)"        # 或 --profile headless / tui
+dsh plugin --profile web add "$(pwd)"        # 或 --profile headless / tui；Desktop 可在 Add plugin 填绝对路径
 ```
 
-包的 `cordis.patch.yml` 会把 Host 半和 Web 半作为同一个 Loader entry（id `dynamic-workflow`）插入 profile。DSH 自带的 `workflow` 工具（YAML 存档工作流）是另一个功能，不冲突。
+### 自动发布（GitHub Actions）
+
+仓库已配置 [`.github/workflows/publish.yml`](.github/workflows/publish.yml)：使用 `npm version patch|minor` 更新版本号并推送 `v*` 标签（`git push --follow-tags`），或在 GitHub Actions 页面手动触发，会自动构建、运行引擎与 journal 契约测试并发布到 GitHub Packages（使用内置 `GITHUB_TOKEN`，无需额外 Secret）。
+
+包的 `cordis.patch.yml` 会把 Host 半和 Web 半作为同一个 Loader entry（id `dynamic-workflow`）插入 profile。DSH 自带的 `workflow` 工具（纯 JS PTC 编排脚本）是另一个功能，不冲突。
 
 ### 配置（`$DSH_HOME/profiles/<profile>/cordis.patch.yml`）
 
@@ -52,10 +75,10 @@ dsh plugin --profile web add "$(pwd)"        # 或 --profile headless / tui
 - **确认卡**（占据输入框位置）：静态阶段图、并发与子代理模型、脚本，按钮为 运行 / 本会话始终允许 / 拒绝 / 提修改意见（带反馈，不运行）。
 - **运行卡**（对话里独立的一行）：启动后由 `dynamicWorkflowRuns` 会话投影实时点亮——运行中的站会脉动、轨道行进，子代理是挂在站下的药丸，点开就在右侧栏打开它的对话；停止 / 续跑 / 打开详情；结束后显示结果与报告。DSH 会在一个 turn 结束后把它的工具调用折叠起来，而 run 比启动它的 turn 活得久，所以运行卡不放在工具卡里，而是作为 turn 级的对话节点（`groupTree: 'turn'`），始终可见；重启 Host 后从持久化的进度记录恢复。
 - **通知条**：送给主代理的 `<task-notification>`、升级、留白等消息显示为一行可展开的状态条（按界面语言显示摘要）；子代理对话里，工作流派给它的任务显示为“工作流任务”。
-- **右侧栏运行面板**：
-  - 完整时间线（不折叠），按阶段的子代理列表：工具调用数、最近工具、缓存命中、改了几个文件。
-  - 待答问题与留白、报告、结果 / 错误、脚本。
-  - **产物**：Markdown、文本、图片直接预览，主产物默认展开。下载会以文件形式保存，不打开新窗口。HTML 和 SVG 只显示源码，不在应用里渲染（与 ZCode 相同）；后端也只以纯文本或位图返回预览，并附带沙箱 CSP。
+- **右侧栏运行面板**（可通过顶部会话栏“工作流”按钮或右侧栏导览随时打开，即使会话还未运行过工作流）：
+  - **竖向 Spine 阶段轨**（带并行分支轨道与分叉/汇合接头、阶段折叠、每阶段最多钉住 5 个子代理药丸 + 可展开的分组名册，避免大扇出拉爆侧栏），内嵌待答问题、留白状态，点击子代理即可打开对话，并显示工具调用数、最近工具、缓存命中、改动文件数。
+  - 报告、结果 / 错误、脚本；超出实时投影窗口（8 个 run）的历史运行仍可直接从 SQLite 快照查看与续跑。
+  - **产物与预设看板**：Markdown、文本、图片直接预览，主产物默认展开；`artifact.chart` / `table` / `metrics` / `board` 预设看板通过增量游标从 `report(item, id)` 实时渲染（折线/柱状/散点、线性/对数坐标、指标卡、去重表格、状态看板）。下载会以文件形式保存，不打开新窗口。HTML 和 SVG 只显示源码，不在应用里渲染（与 ZCode 相同）；后端也只以纯文本或位图返回预览，并附带沙箱 CSP。
   - **脚本步骤**：脚本自己读了哪些文件、搜了什么、跑了哪些命令。
   - **子代理改动**：按子代理列出它通过文件工具改了哪些文件（+行 −行），点开看 diff。
   - **配置**：运行中或停下后改并发和子代理模型。只改并发时原地生效；其余情况开一次修订运行，复用已完成的工作。
@@ -139,7 +162,6 @@ node tests/e2e/web-live.mjs <work> <shots>   # Web：真实 `dsh web` + Playwrig
 ## 已知限制
 
 - 桌面端：DSH 的 `desktop` profile 只能由 Electron 应用管理（CLI 连 `dsh plugin --profile desktop add` 都拒绝），所以没法在这里验收。桌面端运行的是同一套 Web 应用，Web 端的端到端覆盖了它的界面；安装和最终验收需要在桌面应用里进行。
-- 低危问题里还有 12 条未处理（见审查报告的修复状态表），都不影响正常使用：如 skill frontmatter 解析、`resolveSavedArgs` 对显式 `null` 的处理、fallback glob 的 `[!…]` 语义等。
 - `world.run` 的命令由插件自己的执行端口运行（与 ZCode 相同，命令在确认卡的脚本里可见），不经过 DSH 的沙箱策略。
 - 子代理对话的打开依赖 ui-subagent 的 `subagentchat` 标签页；不可用时退回主面板打开。子代理是一次性记录（只读），续跑由 run 的 journal 重放完成，而不是在子代理对话里继续发消息。
 - 样式同时用两种方式交付：DSH 0.2.2-rc.4 的插件 bundle 自行注入 `<style data-plugin>`，较新的源码读 `meta.stylesheets`；两种都提供。

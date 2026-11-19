@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Dynamic workflows",
+    "description": "Typechecked TypeScript multi-agent workflow orchestration for DeepSeek Harness: parallel subagents, SQLite journal resume/amend, typed mid-run holes, vertical spine side pane, and live chart/table/metrics/board dashboard artifacts. Start with /workflow or ask the agent to use a workflow."
+  }
+}

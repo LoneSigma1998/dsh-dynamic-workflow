@@ -126,14 +126,32 @@ export interface ClientContext {
     inject(name: string, callback: () => (() => void) | Generator<() => void>): void
     register(options: SlotRegistration, component: ComponentType<never>): () => void
   }
-  locale: { register(ns: string, dicts: Record<string, Record<string, string>>): () => void }
+  locale: {
+    register(ns: string, dicts: Record<string, Record<string, string>>): () => void
+    bind?(ns: string): Translate
+  }
   uiConversation: { events: { register(definition: ConversationNodeDefinition<never>): () => void } }
   uiWorkspace?: { openSession(target: string | { parentSessionId: string; childSessionId: string; mode: 'one-shot' | 'continuable' | 'unknown' }): void }
   sidebarRight?: {
     openTabIn(sessionId: string, kind: string, options?: { params?: unknown; preferNewPane?: boolean }): void
     openResourceIn?(sessionId: string, address: string, options?: { kind?: string; preferNewPane?: boolean }): void
   }
-  sidebarRightTabs?: { register(definition: { id: string; kind: string; priority?: string; title: (address: string) => string; multiple?: boolean }): () => void }
+  sidebarRightTabs?: {
+    register(definition: {
+      id: string
+      kind: string
+      priority?: string
+      title: (address: string) => string
+      multiple?: boolean
+      guide?: readonly {
+        id: string
+        order: number
+        title: () => string
+        description?: () => string
+        icon?: ComponentType<{ size?: number }>
+      }[]
+    }): () => void
+  }
 }
 
 export type Children = { children?: ReactNode }

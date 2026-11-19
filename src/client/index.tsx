@@ -18,12 +18,14 @@
 
 import './styles.css'
 import type { ComponentType } from 'react'
+import { Button, IconLayersOutlineRegular, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import { ConfirmCard, selectConfirm } from './ConfirmCard.tsx'
-import type { ClientContext } from './host-types.ts'
-import { en, NS, zh } from './locales.ts'
+import type { ClientContext, Translate, UseProjection } from './host-types.ts'
+import { en, NS, zh, type DynamicWorkflowKey } from './locales.ts'
 import { NoticeChip, noticeDefinition } from './notice.tsx'
 import { RUN_TAB_ID, RUN_TAB_KIND, RunPane } from './RunPane.tsx'
 import { RUN_NODE_KIND, RunNode, runNodeDefinition } from './RunNode.tsx'
+import { RUNS_PROJECTION } from './run-view.ts'
 import { FillHoleRow, WorkflowToolCard } from './WorkflowToolCard.tsx'
 
 export const inject = ['slots', 'locale', 'uiConversation']
@@ -34,10 +36,41 @@ function subagentChatAddress(parentSessionId: string, childSessionId: string): s
   return `${SUBAGENT_CHAT}${encodeURIComponent(childSessionId)}?${new URLSearchParams({ parent: parentSessionId, mode: 'unknown' })}`
 }
 
+interface WorkflowHeaderButtonProps {
+  t: Translate
+  useProjection?: UseProjection
+  openHome: () => void
+}
+
+/** Session-header entry button: 1-click access to Workflows Home (runs, routing mode, saved workflows) even in empty sessions. */
+function WorkflowHeaderButton({ t, useProjection, openHome }: WorkflowHeaderButtonProps) {
+  const runs = useProjection?.(RUNS_PROJECTION, state => state?.runs)
+  const running = (runs ?? []).filter(run => run.status === 'running' || run.status === 'pending').length
+  const total = runs?.length ?? 0
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      className="dwf-header-btn"
+      aria-label={t('header.open')}
+      icon={<IconLayersOutlineRegular size={14} />}
+      onClick={openHome}
+      data-dwf-header-btn=""
+    >
+      <span>{t('header.workflows')}</span>
+      {running > 0 ? <StateDot state="ongoing" size={8} /> : null}
+      {running > 0 ? <span className="dwf-header-count">{running}</span> : total > 0 ? <span className="dwf-header-count dwf-muted">{total}</span> : null}
+    </Button>
+  )
+}
+
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dynamic-workflow: dictionaries')
   ctx.effect(() => ctx.uiConversation.events.register(noticeDefinition as never), 'dynamic-workflow: notice definition')
   ctx.effect(() => ctx.uiConversation.events.register(runNodeDefinition as never), 'dynamic-workflow: run node definition')
+
+  const boundT = ctx.locale.bind?.(NS)
+  const translate = (key: DynamicWorkflowKey): string => boundT?.(key) ?? en[key]
 
   /** Open a workflow subagent's transcript: aside in the right sidebar when possible, else in the main panel. */
   const openChild = (parentSessionId: string, childSessionId: string): void => {
@@ -53,9 +86,9 @@ export function apply(ctx: ClientContext): void {
     const workspace = ctx.get('uiWorkspace') as ClientContext['uiWorkspace'] | undefined
     workspace?.openSession({ parentSessionId, childSessionId, mode: 'unknown' })
   }
-  const openRun = (sessionId: string, runId: string): void => {
+  const openRun = (sessionId: string, runId?: string): void => {
     const sidebar = ctx.get('sidebarRight') as ClientContext['sidebarRight'] | undefined
-    sidebar?.openTabIn(sessionId, RUN_TAB_KIND, { params: { sessionId, runId } })
+    sidebar?.openTabIn(sessionId, RUN_TAB_KIND, { params: runId === undefined ? { sessionId } : { sessionId, runId } })
   }
   const cardInject = (sessionId: string) => ({
     openChild: (childSessionId: string) => openChild(sessionId, childSessionId),
@@ -90,13 +123,29 @@ export function apply(ctx: ClientContext): void {
     }, RunNode as ComponentType<never>)
   })
 
+  // Session header entry: always reachable even before a session launches its first workflow.
+  ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+    name: 'conversation.session.header.actions',
+    id: 'dynamic-workflow-header',
+    order: 50,
+    locale: NS,
+    inject: ((sessionId: string) => ({ openHome: () => openRun(sessionId) })) as never,
+  }, WorkflowHeaderButton as ComponentType<never>))
+
   // The run pane needs the right sidebar; without it the card's "Open details" is a no-op.
   ctx.inject(['sidebarRightTabs', 'slots'], (scope) => {
     scope.effect(() => scope.sidebarRightTabs!.register({
       id: RUN_TAB_ID,
       kind: RUN_TAB_KIND,
       priority: 'extension',
-      title: () => 'Workflow',
+      title: () => translate('guide.title'),
+      guide: [{
+        id: 'home',
+        order: 40,
+        title: () => translate('guide.title'),
+        description: () => translate('guide.description'),
+        icon: IconLayersOutlineRegular,
+      }],
     }), 'dynamic-workflow: run tab type')
     scope.slots.inject('sidebar.right.pane.tab', () => scope.slots.register({
       name: 'sidebar.right.pane.tab',

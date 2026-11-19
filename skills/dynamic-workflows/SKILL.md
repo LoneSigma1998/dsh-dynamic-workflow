@@ -38,19 +38,19 @@ claim costs little or a command has already decided it.
 
 | The request | The tool |
 | --- | --- |
-| One thing delegated to one agent | `Agent` |
-| A few independent lookups, nobody reading anybody's answer | `Agent`, in parallel |
-| Anything else the user did not name a workflow for, however many steps it needs | `Agent`, or do it yourself |
-| The user said "use a workflow" / "使用 workflow" / "用工作流" — any phrasing naming workflow as the means | `create_workflow`, mandatory, even if `Agent` would have done or one reply could answer |
+| One thing delegated to one agent | `subagent` |
+| A few independent lookups, nobody reading anybody's answer | `subagent`, in parallel |
+| Anything else the user did not name a workflow for, however many steps it needs | `subagent`, or do it yourself |
+| The user said "use a workflow" / "使用 workflow" / "用工作流" — any phrasing naming workflow as the means | `create_workflow`, mandatory, even if `subagent` would have done or one reply could answer |
 
 **Only an explicit request starts a workflow.** A workflow begins with `/workflow` or with
 the user naming workflow/工作流 as the means, never with your own judgement that a task
 looks orchestration-shaped. Results feeding later steps, a bounded loop, a branch on a typed
 result — those are shapes the script is good at once one has been requested, not reasons
-there should be one. Delegate with `Agent` or do the work yourself.
+there should be one. Delegate with `subagent` or do the work yourself.
 
 **An explicit request is binding.** Once the user names workflow/工作流 as the means, the
-routing question is closed — not `Agent`, not inline, not "too small for a workflow"; what
+routing question is closed — not `subagent`, not inline, not "too small for a workflow"; what
 remains is only how big the script should be, and the smallest task gets a small workflow.
 
 An explicit workflow request is a request for depth, and the bar above is the measure.
@@ -105,7 +105,7 @@ those rules out. Every subagent has the same tools; what it may do with them is 
 ask: a reviewer that must not touch the code is told "do not edit any file".
 
 **Per-subagent model**, only when the user asked for one, with the name they used:
-`agent("judge", { model: "GLM-5.3-Flash" })`, ids from `ListModels`. A literal or a `model()`
+`agent("judge", { model: "GLM-5.3-Flash" })`, ids from `list_subagent_models`. A literal or a `model()`
 ModelRef; to route, map the router's typed key to a `model()` table (`patterns.md` #13).
 NEVER move a subagent to a model under another provider on your own — not for a judge, not
 because it looks cheaper; another provider is another bill. When a lighter model would
@@ -719,7 +719,7 @@ workspace, since its rows are the chart's points.
 The complete review workflow that used to sit here — a reviewer per changed file, triage
 through one shared subagent that is fed as reviews land, a confirmer per kept finding chained
 inside the same callback, one join for the cross-file deduplication — is
-`${ZCODE_SKILL_DIR}/examples.md` §5; §7 and §10 carry its rules. The open-ended form — a
+`examples.md` §5 (beside this `SKILL.md`); §7 and §10 carry its rules. The open-ended form — a
 seed that surveys and ends in a tail hole, grown fill by fill — is `examples.md` #7 (§15).
 
 ## 12. Anti-patterns
@@ -1057,13 +1057,13 @@ amend the draft as usual. Full scripts: `patterns.md` #14–#16, `examples.md` #
 
 ## Going deeper
 
-- `${ZCODE_SKILL_DIR}/patterns.md` — the topology catalogue. Its index puts the pipeline
+- `patterns.md` (beside this `SKILL.md`) — the topology catalogue. Its index puts the pipeline
   shapes first: per-item chaining, streaming through channels, a feedback loop with a counted
   close. Then fan-out/fan-in, review sweeps, planner-reviewer loops, judge panels, staged
   handoffs, bounded discovery, `world.run`-gated verifier loops, model routing, and the hole
   shapes (growth by tail holes, a stage shaped by discovery, a remedy hole). Read it when you
   know the shape you want and want it written correctly.
-- `${ZCODE_SKILL_DIR}/examples.md` — complete worked scripts, including a two-subagent
+- `examples.md` (beside this `SKILL.md`) — complete worked scripts, including a two-subagent
   adversarial prove/disprove loop and a repository guide grown step by step through tail
   holes. Read one when you want to see a whole script's arc.
 
@@ -1109,7 +1109,7 @@ Either way the user confirms the run, and the confirmation shows the actual scri
 - `subagent_model`: the model the subagents run on, as `providerId/modelId` or a bare model
   id (optionally `$reasoningLevel`). Set it only when the user asks for a specific model;
   pass the name they used, and if the tool cannot resolve it, pick from the ids it lists or
-  `ListModels`. NEVER set a model under another provider the user did not ask for: a bare
+  `list_subagent_models`. NEVER set a model under another provider the user did not ask for: a bare
   name resolves only within the session's provider, and crossing to another one is written
   as the full `providerId/modelId`, which you write only when the user named that model.
   If you think a cheaper or faster model elsewhere would serve the run, ask the user before
@@ -1516,7 +1516,7 @@ same call, so never `stop_workflow_run` it first and never rewrite it from scrat
 - `subagent_model`: omit to keep the predecessor's choice, pass `null` to put the subagents
   back on the session model, pass a model id to change it (only when the user asks; never
   a model under another provider the user did not name — ask them first if you think one
-  would help). `ListModels` lists the ids.
+  would help). `list_subagent_models` lists the ids.
 
 Changing only a setting on a running run still stops it; what it had in flight runs again in
 the new run, except that a named subagent whose unfinished ask you did not change picks that

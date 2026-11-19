@@ -89,17 +89,27 @@ declare module '@deepseek-ai/dsh-llm' {
 /** Tools the main agent has that a workflow subagent must never see. */
 export const CHILD_DENIED_TOOLS = [
   'create_workflow', 'amend_workflow', 'fill_workflow_hole', 'resume_workflow_run', 'stop_workflow_run',
-  'resolve_workflow_question', 'save_workflow', 'eval_workflow_snippet', 'retune_workflow_run',
-  // interaction with the user goes through the main agent
-  'ask_user_question', 'enter_plan_mode', 'exit_plan_mode',
-  // DSH's own orchestration surfaces: a subagent does not start workflows or teams of its own
+  'resolve_workflow_question', 'get_workflow_run', 'list_workflow_runs', 'save_workflow', 'eval_workflow_snippet', 'retune_workflow_run',
+  // interaction with the user goes through the main agent (escalate)
+  'ask_user_question', 'enter_plan_mode', 'exit_plan_mode', 'propose_action', 'present',
+  // DSH's own orchestration, delegation, scheduling & system-mutation surfaces:
+  // subagents do not spawn unmanaged grandchildren, teams, goals, cron jobs or plugins
   'workflow', 'ralph',
+  'subagent', 'subagent_fork', 'subagent_oar', 'send_message', 'wait_agent', 'interrupt_agent', 'list_agents',
+  'team_task_create', 'team_task_update',
+  'create_goal', 'update_goal',
+  'schedule_create', 'schedule_edit',
+  'plugin_manager', 'plugin_market',
+  'create_worktree',
 ]
 
 /** Tool names that write the workspace (first one closes an amended run's import cache). */
 const MUTATING_TOOLS = new Set([
   'write', 'edit', 'apply_patch', 'str_replace_editor', 'str_replace_based_edit_tool', 'multi_edit',
-  'bash', 'pwsh', 'bash_persistent', 'pwsh_persistent', 'terminal_write', 'terminal_run',
+  'bash', 'pwsh', 'bash_persistent', 'pwsh_persistent',
+  'terminal_open', 'terminal_send', 'terminal_signal',
+  'office_convert', 'office_recalculate',
+  'create_worktree',
 ])
 /** File tools whose targets the change lens follows (bash and terminals cannot be followed by path). */
 const FILE_TOOLS = new Set(['write', 'edit', 'multi_edit', 'str_replace_editor', 'str_replace_based_edit_tool', 'apply_patch'])
@@ -149,8 +159,15 @@ function webSearchBudgetExhaustedMessage(limit: number): string {
 
 /** Tools that only read the workspace (they still count as world-touching for cache purity). */
 const PROTOCOL_TOOLS = new Set(['submit_result', 'escalate'])
-/** Tools allowed for an `access: "read-only"` persona (plus the two protocol tools). */
-const READ_ONLY_TOOLS = ['read', 'read_image', 'glob', 'grep', 'web_search', 'web_fetch', 'skill', 'todo_write', 'job_output', 'job_list']
+/** Inherited tools allowed for an `access: "read-only"` persona (scope-local `submit_result`/`escalate` stay visible automatically). */
+export const READ_ONLY_TOOLS = [
+  'read', 'read_image', 'glob', 'grep', 'lsp',
+  'web_search', 'web_fetch', 'skill', 'todo_write',
+  'job_output', 'job_list', 'list_subagent_models',
+  'terminal_read', 'terminal_list', 'user_terminal_read', 'user_terminal_list',
+  'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource',
+  'list_saved_workflows',
+]
 
 export interface ArtifactPort {
   publish(request: ArtifactPublishRequest): Promise<ArtifactVersionRecord>
@@ -350,11 +367,12 @@ class DshWorkflowDriver implements WorkflowDriver {
     this.sessions.set(sessionId, state)
     // The driver owns the session id and the resolved model (journal; engine carries them forward).
     const row = this.journal.getActor(runId, actor.siteId, actor.ordinal)
+    const effortSuffix = agentOptions.reasoningEffort === undefined ? '' : `$${String(agentOptions.reasoningEffort)}`
     this.journal.putActor({
       ...row ?? { runId, siteId: actor.siteId, ordinal: actor.ordinal },
       sessionId,
       ...agentOptions.provider !== undefined && agentOptions.model !== undefined
-        ? { resolvedModel: `${agentOptions.provider}/${agentOptions.model}` }
+        ? { resolvedModel: `${agentOptions.provider}/${agentOptions.model}${effortSuffix}` }
         : {},
     })
     return state.ref
@@ -381,30 +399,31 @@ class DshWorkflowDriver implements WorkflowDriver {
     return { events: forked, inherited: boundary + 1 }
   }
 
-  /** `provider/model` of a pinned actor as agent options (undefined when absent or malformed). */
+  /** Parse `provider/model[$effort]` into DSH `AgentOptions` (undefined when absent or malformed). */
+  private parseModelSpec(value: string | undefined): AgentOptions | undefined {
+    return parseModelSpec(value)
+  }
+
+  /** `provider/model[$effort]` of a pinned actor as agent options (undefined when absent or malformed). */
   private pinnedAgentOptions(pinned: string | undefined): AgentOptions | undefined {
-    if (pinned === undefined) return undefined
-    const slash = pinned.indexOf('/')
-    if (slash <= 0 || slash === pinned.length - 1) return undefined
-    return { provider: pinned.slice(0, slash), model: pinned.slice(slash + 1) }
+    return this.parseModelSpec(pinned)
   }
 
   /** Provider/model for a subagent: persona model binding > run subagent model > parent route. */
   private resolveAgentOptions(persona: PersonaSpec): AgentOptions {
     const parentRoute = this.parentRoute()
-    const split = (value: string | undefined): { provider: string; model: string } | undefined => {
-      if (value === undefined) return undefined
-      const slash = value.indexOf('/')
-      if (slash <= 0) return undefined
-      const withoutLevel = value.split('$')[0] ?? value
-      return { provider: withoutLevel.slice(0, slash), model: withoutLevel.slice(slash + 1) }
+    const qualify = (spec: string | undefined): string | undefined => {
+      if (spec === undefined) return undefined
+      const trimmed = spec.trim()
+      if (trimmed.length === 0) return undefined
+      return trimmed.includes('/') || parentRoute === undefined ? trimmed : `${parentRoute.provider}/${trimmed}`
     }
-    const bound = persona.model === undefined ? undefined : this.deps.modelBindings?.[persona.model]
-    const fromPersona = split(bound)
+    const bound = persona.model === undefined ? undefined : qualify(this.deps.modelBindings?.[persona.model])
+    const fromPersona = this.parseModelSpec(bound)
     if (persona.model !== undefined && fromPersona === undefined) {
       throw new WorkflowError('DriverError', `Model "${persona.model}" named by subagent ${persona.name ?? '(anonymous)'} is not bound for this run.`)
     }
-    const chosen = fromPersona ?? split(this.deps.subagentModel) ?? parentRoute
+    const chosen = fromPersona ?? this.parseModelSpec(qualify(this.deps.subagentModel)) ?? parentRoute
     return { ...chosen ?? {} }
   }
 
@@ -453,14 +472,16 @@ class DshWorkflowDriver implements WorkflowDriver {
       }
     }
     if (input.fresh && parent !== undefined) {
-      // Delegated policy: fixed at delegation, approvals never prompt from inside a run.
+      // Delegated policy: fixed at delegation, approvals never prompt from inside a run (DSH
+      // `approval/policy: 'never'` fails closed — any action requiring approval is auto-rejected).
       try {
         const preset = (parent.ctx.get('permissionPresets') as { current?: (s: unknown) => string } | undefined)?.current?.(parent.session)
-        const sandboxMode = (parent.ctx.get('sandboxPolicy') as { overrideOf?: (s: unknown) => string | undefined } | undefined)?.overrideOf?.(parent.session)
+        const sandboxPolicy = parent.ctx.get('sandboxPolicy') as { overrideOf?: (s: unknown) => string | undefined } | undefined
+        const sandboxMode = input.access === 'read-only' && sandboxPolicy !== undefined ? 'read-only' : sandboxPolicy?.overrideOf?.(parent.session)
         const append = child.session.append.bind(child.session) as (type: string, data: unknown) => void
         if (sandboxMode !== undefined) append('sandbox/mode', { mode: sandboxMode, source: 'delegation' })
         if (parent.ctx.get('approval') !== undefined) append('approval/policy', { policy: 'never', source: 'delegation' })
-        if (preset === 'auto' || preset === 'danger-full-access') append('permission/preset', { preset })
+        if (input.access !== 'read-only' && (preset === 'auto' || preset === 'danger-full-access')) append('permission/preset', { preset })
       } catch (error) {
         this.deps.logger?.warn('dynamic-workflow: could not seed delegated policy for %s: %s', sessionId, String(error))
       }
@@ -488,16 +509,19 @@ class DshWorkflowDriver implements WorkflowDriver {
       restrict(rule: { allow?: string[]; deny?: string[] }): () => void
       definitions(scope?: unknown): readonly { name: string }[]
     }
+    // Snapshot inherited (global + preset) tool names BEFORE registering scope-local protocol
+    // tools: DSH's `tools.restrict()` only accepts inherited names (`restrictableNames`) and throws
+    // if given scope-local names (`submit_result` / `escalate`), while keeping scope-local tools
+    // automatically exempt from restrictions.
+    const inheritedKnown = new Set(tools.definitions(child).map(definition => definition.name))
     if (submitProfile.kind !== 'untyped') {
       tools.register(this.submitResultTool(sessionId, submitProfile))
     }
     tools.register(this.escalateTool(sessionId, actor, input.actorName))
-    // restrict() refuses names it does not know: only name tools this composition has.
-    const known = new Set(tools.definitions(child).map(definition => definition.name))
     if (input.access === 'read-only') {
-      tools.restrict({ allow: [...READ_ONLY_TOOLS, 'submit_result', 'escalate'].filter(name => known.has(name)) })
+      tools.restrict({ allow: READ_ONLY_TOOLS.filter(name => inheritedKnown.has(name)) })
     } else {
-      const deny = CHILD_DENIED_TOOLS.filter(name => known.has(name))
+      const deny = CHILD_DENIED_TOOLS.filter(name => inheritedKnown.has(name))
       if (deny.length > 0) tools.restrict({ deny })
     }
 
@@ -718,7 +742,9 @@ class DshWorkflowDriver implements WorkflowDriver {
   }
 
   cancelAsk(instance: InstanceRef): void {
-    const state = this.instanceToSession.get(refToString(instance))
+    const key = refToString(instance)
+    const state = this.instanceToSession.get(key)
+    this.instanceToSession.delete(key)
     if (state === undefined) return
     state.cancelled = true
     const deferred = state.pendingSubmit
@@ -860,16 +886,21 @@ class DshWorkflowDriver implements WorkflowDriver {
     state.unknownFailures = 0
     if (state.accepted) {
       this.journalBoundary(state, instance)
+      this.instanceToSession.delete(refToString(instance))
       return
     }
     const before = state.turnGeneration
     this.sink.askTurnEnded(instance, facts.finalText)
     // A nudge starts a new generation inside that call: the exchange is not over yet.
-    if (state.turnGeneration === before) this.journalBoundary(state, instance)
+    if (state.turnGeneration === before) {
+      this.journalBoundary(state, instance)
+      this.instanceToSession.delete(refToString(instance))
+    }
   }
 
   private onTurnRejected(state: ActorState, instance: InstanceRef, error: unknown): void {
     this.withdrawEscalations(state)
+    this.instanceToSession.delete(refToString(instance))
     if (state.cancelled || this.disposed) return
     this.sink.askFailed(instance, toWorkflowError(error))
   }
@@ -880,6 +911,7 @@ class DshWorkflowDriver implements WorkflowDriver {
     const route = state.agent.session.requestHeader?.()?.config
     const label = subagentLabel(state.actor, state.actorName)
     if (verdict.kind === 'context_exceeded') {
+      this.instanceToSession.delete(refToString(instance))
       this.sink.askFailed(instance, new WorkflowError('ContextLimit',
         `Subagent ${label} exceeded the model's context window even after compaction. Give this ask a smaller input or split the work across subagents.`))
       return
@@ -1106,6 +1138,23 @@ interface TurnFacts {
   tokens: number
   requests: number
   end?: { kind: string; error?: { code?: string; message?: string; status?: number; providerRetryAfterMs?: number } }
+}
+
+/** Parse `provider/model[$effort]` into DSH `AgentOptions` (undefined when absent or malformed). */
+export function parseModelSpec(value: string | undefined): AgentOptions | undefined {
+  if (value === undefined) return undefined
+  const slash = value.indexOf('/')
+  if (slash <= 0 || slash === value.length - 1) return undefined
+  const dollar = value.indexOf('$', slash + 1)
+  const provider = value.slice(0, slash)
+  const model = dollar < 0 ? value.slice(slash + 1) : value.slice(slash + 1, dollar)
+  const effort = dollar < 0 ? undefined : value.slice(dollar + 1).trim()
+  if (model.length === 0) return undefined
+  return {
+    provider,
+    model,
+    ...effort !== undefined && effort.length > 0 ? { reasoningEffort: effort as AgentOptions['reasoningEffort'] } : {},
+  }
 }
 
 /** Final assistant text (last non-empty message, else streamed text), token usage and turn end. */

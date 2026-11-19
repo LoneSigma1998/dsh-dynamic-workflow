@@ -17,6 +17,7 @@ import {
   SNIPPET_FACADE_DTS,
   validate,
   WorkflowError,
+  type AskSpec,
   type JsonSchema,
   type RunEvent,
   type WorkflowDriver,
@@ -29,26 +30,57 @@ const MAX_LOGS = 100
 const MAX_LOG_CHARS = 2048
 const MAX_RESULT_BYTES = 256 * 1024
 
+export interface PreparedSnippet {
+  lowered: string
+  askSpecs: Map<string, AskSpec>
+  /** Literal `world.run` commands declared by this snippet (non-empty ⇒ requires confirmation). */
+  worldRunCommands: readonly string[]
+}
+
+export type SnippetInspectResult =
+  | { ok: true; prepared: PreparedSnippet }
+  | { ok: false; text: string }
+
+/** Compile a snippet against the scratch facade once and collect any literal `world.run` commands. */
+export function inspectSnippet(code: string): SnippetInspectResult {
+  const workflow = createWorkflowProgram(code, { facadeDts: SNIPPET_FACADE_DTS })
+  const diagnostics = collectDiagnostics(workflow.program)
+  if (diagnostics.length > 0) {
+    return { ok: false, text: `Diagnostics:\n${diagnostics.map(d => `L${d.line}:C${d.column} ${d.message}`).join('\n')}` }
+  }
+  const table = collectSites(workflow)
+  const worldRun = collectWorldRunCommands(workflow, table)
+  if (worldRun.diagnostics.length > 0) {
+    return { ok: false, text: `Diagnostics:\n${worldRun.diagnostics.map(d => `L${d.line}:C${d.column} ${d.message}`).join('\n')}` }
+  }
+  const lowered = lowerWorkflow(workflow, table)
+  return {
+    ok: true,
+    prepared: {
+      lowered: lowered.code,
+      askSpecs: buildAskSpecs(table, {}),
+      worldRunCommands: worldRun.commands,
+    },
+  }
+}
+
 export interface SnippetRunner {
-  run(code: string, cwd: string, timeoutMs: number, signal?: AbortSignal): Promise<{ ok: boolean; text: string }>
+  inspect(code: string): SnippetInspectResult
+  run(code: string, cwd: string, timeoutMs: number, signal?: AbortSignal, prepared?: PreparedSnippet): Promise<{ ok: boolean; text: string }>
 }
 
 export function createSnippetRunner(): SnippetRunner {
   const fileSystemPort = createNodeFileSystemPort()
   const executionPort = createNodeExecutionPort()
   return {
-    async run(code, cwd, timeoutMs, signal) {
-      const workflow = createWorkflowProgram(code, { facadeDts: SNIPPET_FACADE_DTS })
-      const diagnostics = collectDiagnostics(workflow.program)
-      if (diagnostics.length > 0) {
-        return { ok: false, text: `Diagnostics:\n${diagnostics.map(d => `L${d.line}:C${d.column} ${d.message}`).join('\n')}` }
+    inspect: inspectSnippet,
+    async run(code, cwd, timeoutMs, signal, prepared) {
+      let ready = prepared
+      if (ready === undefined) {
+        const inspected = inspectSnippet(code)
+        if (!inspected.ok) return inspected
+        ready = inspected.prepared
       }
-      const table = collectSites(workflow)
-      const worldRun = collectWorldRunCommands(workflow, table)
-      if (worldRun.diagnostics.length > 0) {
-        return { ok: false, text: `Diagnostics:\n${worldRun.diagnostics.map(d => `L${d.line}:C${d.column} ${d.message}`).join('\n')}` }
-      }
-      const lowered = lowerWorkflow(workflow, table)
       const logs: string[] = []
       let logsTruncated = false
       const capture = (event: RunEvent): void => {
@@ -59,27 +91,41 @@ export function createSnippetRunner(): SnippetRunner {
         }
         logs.push(event.message.slice(0, MAX_LOG_CHARS))
       }
+      // Combine caller cancel and wall-clock timeout into one signal so `world.run` / `git.*`
+      // child process trees are killed immediately when the snippet is aborted or times out.
+      const combined = new AbortController()
+      const onCallerAbort = (): void => { combined.abort(signal?.reason ?? new Error('aborted')) }
+      if (signal?.aborted === true) onCallerAbort()
+      else signal?.addEventListener('abort', onCallerAbort, { once: true })
+      const timer = setTimeout(() => { combined.abort(new Error(`snippet timed out after ${timeoutMs}ms`)) }, timeoutMs)
+      timer.unref?.()
       const unreachable = (member: string): WorkflowError => new WorkflowError('DriverError', `Snippet driver received ${member}; the scratch facade has no agent().`)
       const driver: WorkflowDriver = {
         createActorSession: () => Promise.reject(unreachable('createActorSession')),
         startAsk: () => { throw unreachable('startAsk') },
         respondToSubmit: () => { throw unreachable('respondToSubmit') },
         cancelAsk: () => undefined,
-        executeWorldRead: (op, args) => executeWorldRead({ fileSystemPort, executionPort, cwd }, op, args),
+        executeWorldRead: (op, args) => executeWorldRead({ fileSystemPort, executionPort, cwd, signal: combined.signal }, op, args),
         journal: new InMemoryJournalStore(),
         emit: capture,
       }
-      const settlement = await runWorkflowScript({
-        askSpecs: buildAskSpecs(table, {}),
-        caps: { maxConcurrency: 4 },
-        cwd,
-        lowered: lowered.code,
-        makeDriver: () => driver,
-        runId: `dwfeval-${randomUUID()}`,
-        ...signal === undefined ? {} : { signal },
-        timeoutMs,
-        validate: (schema, value) => validate(schema as JsonSchema, value),
-      })
+      let settlement
+      try {
+        settlement = await runWorkflowScript({
+          askSpecs: ready.askSpecs,
+          caps: { maxConcurrency: 4 },
+          cwd,
+          lowered: ready.lowered,
+          makeDriver: () => driver,
+          runId: `dwfeval-${randomUUID()}`,
+          signal: combined.signal,
+          timeoutMs,
+          validate: (schema, value) => validate(schema as JsonSchema, value),
+        })
+      } finally {
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', onCallerAbort)
+      }
       const logText = logs.length === 0 ? '' : `\nLogs${logsTruncated ? ' (truncated)' : ''}:\n${logs.map(line => `  ${line}`).join('\n')}`
       if (settlement.status === 'completed') {
         const artifact = (settlement as { artifact?: unknown }).artifact

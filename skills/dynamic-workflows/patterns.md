@@ -640,7 +640,7 @@ propose it and ask before the call (SKILL.md §2).
 
 <!-- compile -->
 ```ts
-// Every model the run can use, declared once; names come from ListModels.
+// Every model the run can use, declared once; names come from list_subagent_models.
 const MODELS = {
   light: model("GLM-5.3-Flash"),
   strong: model("GLM-5.3$high"),

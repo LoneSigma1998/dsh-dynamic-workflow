@@ -10,6 +10,8 @@
  * client draws as the timeline.
  */
 
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-tools'
@@ -25,7 +27,7 @@ import type { SnippetRunner } from '../service/snippet.ts'
 import type { ConfirmSettings, LaunchConfirmation } from './confirm.ts'
 import { recordAuthoredDraft } from './drafts.ts'
 import { sessionHasLoadedSkill, skillGateMessage } from './skill-gate.ts'
-import { describePath, findSaved, listSaved, readScriptFile, resolveSavedArgs, writeDraft, writeSaved } from './sources.ts'
+import { describePath, findSaved, listSaved, readScriptFile, resolveSavedArgs, savedDir, slugOf, writeDraft, writeSaved } from './sources.ts'
 
 export interface ToolDeps {
   ctx: Context
@@ -192,20 +194,21 @@ export function registerWorkflowTools(deps: ToolDeps): void {
         },
         args: { type: 'object', description: 'Arguments for a `path` script (read through the `args` global).' },
         max_concurrency: { type: 'integer', description: 'Bound on tasks in flight at once (default: machine parallelism).' },
-        subagent_model: { type: 'string', description: 'provider/model the subagents run on (default: this session\'s model).' },
+        subagent_model: { type: 'string', description: 'provider/model or bare model id (optionally $effort) the subagents run on (default: this session\'s model).' },
       },
       additionalProperties: false,
     },
     execute: async (args, exec) => {
       const agent = requireAgent(exec, 'create_workflow')
       const cwd = agent.session.header.cwd ?? process.cwd()
-      const sources = [args.script, args.path, args.saved].filter(value => value !== undefined)
+      const sources = [args.script, args.path, args.saved].filter(value => value !== undefined && value !== null)
       if (sources.length !== 1) throw new Error('Pass exactly one of `script`, `path` or `saved`.')
       let scriptText: string
       let scriptPath: string | undefined
       let runArgs: Record<string, unknown> | undefined
       let name = str(args.name)
-      if (args.saved !== undefined) {
+      if (args.saved !== undefined && args.saved !== null) {
+        if (typeof args.saved !== 'object' || Array.isArray(args.saved)) throw new Error('`saved` must be an object with a `name` string.')
         const saved = args.saved as { name?: unknown; scope?: unknown; args?: Record<string, unknown> }
         const found = typeof saved.name === 'string' ? findSaved(cwd, saved.name, saved.scope === 'project' || saved.scope === 'global' ? saved.scope : undefined) : undefined
         if (found === undefined) throw new Error(`No saved workflow named ${JSON.stringify(saved.name)}. list_saved_workflows lists them.`)
@@ -240,7 +243,15 @@ export function registerWorkflowTools(deps: ToolDeps): void {
       const compiled = compileOnce(scriptText)
       name ??= compiled.phases.phaseNames[0] ?? 'workflow'
       let maxConcurrency = int(args.max_concurrency) ?? service.defaultConcurrency()
-      let subagentModel = str(args.subagent_model)
+      let subagentModel = service.resolveModelSpec(str(args.subagent_model), agent)
+      const modelErrors = await service.validateModels(compiled, subagentModel, agent)
+      if (modelErrors.length > 0) {
+        return {
+          ok: false,
+          text: `Unknown model in workflow configuration; nothing was started:\n${modelErrors.join('\n')}${pathNote}`,
+          display: displayOf('create_workflow', analysis, { name, ...scriptPath === undefined ? {} : { scriptPath: describePath(cwd, scriptPath) } }),
+        }
+      }
       const display = displayOf('create_workflow', analysis, {
         name, maxConcurrency, ...subagentModel === undefined ? {} : { subagentModel },
         ...scriptPath === undefined ? {} : { scriptPath: describePath(cwd, scriptPath) },
@@ -282,7 +293,7 @@ export function registerWorkflowTools(deps: ToolDeps): void {
         path: { type: 'string', description: 'The revised script file (normally the draft you edited).' },
         name: { type: 'string' },
         max_concurrency: { type: 'integer', description: 'New bound; omit to inherit, -1 (or null) to reset to the default.' },
-        subagent_model: { type: 'string', description: 'provider/model; omit to inherit, "" to reset to the session model.' },
+        subagent_model: { type: 'string', description: 'provider/model or bare model id (optionally $effort); omit to inherit, "" to reset to the session model.' },
       },
       required: ['run_id'],
       additionalProperties: false,
@@ -331,13 +342,26 @@ export function registerWorkflowTools(deps: ToolDeps): void {
       const compiled: CompiledScript = compileOnce(scriptText)
       const name = str(args.name) ?? predecessor.name ?? compiled.phases.phaseNames[0] ?? 'workflow'
       let maxConcurrency = resetMax ? service.defaultConcurrency() : maxArg ?? predecessor.caps.maxConcurrency
-      let subagentModel = args.subagent_model === '' ? undefined : str(args.subagent_model) ?? (args.subagent_model === undefined ? launchedSubagentModel(service, runId) : undefined)
+      const rawSubagentModel = args.subagent_model === '' ? undefined : str(args.subagent_model) ?? (args.subagent_model === undefined ? launchedSubagentModel(service, runId) : undefined)
+      let subagentModel = service.resolveModelSpec(rawSubagentModel, agent)
+      const modelErrors = await service.validateModels(compiled, subagentModel, agent)
+      if (modelErrors.length > 0) {
+        return {
+          ok: false,
+          text: `Unknown model in amended workflow configuration; nothing was started or stopped:\n${modelErrors.join('\n')}${pathNote}`,
+          display: displayOf('amend_workflow', analysis, { name, supersededRunId: runId }),
+        }
+      }
       const display = displayOf('amend_workflow', analysis, {
         name, maxConcurrency, supersededRunId: runId, ...subagentModel === undefined ? {} : { subagentModel },
         ...scriptPath === undefined ? {} : { scriptPath: describePath(cwd, scriptPath) },
       })
-      // Amending this session's own run (not stopped by the user) skips the window.
-      const own = predecessor.parentSessionId === (agent.id as string) && predecessor.stopReason !== 'user'
+      // Amending this session's own run (not stopped by the user) skips confirmation ONLY when it
+      // introduces no new provider beyond what the predecessor already authorized (ZCode parity).
+      const prevProviders = service.launchedProviders(runId)
+      const nextProviders = service.candidateProviders(compiled, subagentModel, agent)
+      const introducesProvider = [...nextProviders].some(provider => !prevProviders.has(provider))
+      const own = predecessor.parentSessionId === (agent.id as string) && predecessor.stopReason !== 'user' && !introducesProvider
       if (!own) {
         const decision = await confirmation.confirm(agent, { tool: 'amend_workflow', name, scriptText, display, settings: { maxConcurrency, ...subagentModel === undefined ? {} : { subagentModel } } }, exec.signal)
         if (decision.kind !== 'allow') return denied('amend_workflow', decision, display, pathNote)
@@ -517,6 +541,7 @@ export function registerWorkflowTools(deps: ToolDeps): void {
     },
     execute: async (args, exec) => {
       const agent = requireAgent(exec, 'save_workflow')
+      gate(agent, 'save_workflow')
       const cwd = agent.session.header.cwd ?? process.cwd()
       const script = typeof args.script === 'string' ? args.script
         : typeof args.script_path === 'string' ? readScriptFile(cwd, args.script_path).text
@@ -524,12 +549,30 @@ export function registerWorkflowTools(deps: ToolDeps): void {
       if (script === undefined) throw new Error('Pass `script`, `script_path` or `run_id`.')
       const analysis = analyzeWorkflowScript(script)
       if (!analysis.ok) return { ok: false, text: `The script does not compile, so it was not saved:\n${diagnosticsText(analysis)}` }
-      const path = writeSaved(cwd, args.scope === 'global' ? 'global' : 'project', {
-        name: String(args.name), description: String(args.description),
+      const scope: 'project' | 'global' = args.scope === 'global' ? 'global' : 'project'
+      const workflowName = String(args.name)
+      const description = String(args.description)
+      const targetPath = join(savedDir(cwd, scope), `${slugOf(workflowName, script)}.dwf.ts`)
+      const overwrites = existsSync(targetPath)
+      const display = displayOf('save_workflow', analysis, { name: workflowName })
+      const decision = await confirmation.confirm(agent, {
+        tool: 'save_workflow',
+        name: workflowName,
+        scriptText: script,
+        display,
+        settings: { maxConcurrency: service.defaultConcurrency() },
+        allowAlways: false,
+        saveTarget: { scope, path: describePath(cwd, targetPath), description, overwrites },
+      }, exec.signal)
+      if (decision.kind !== 'allow') {
+        return { ok: false, text: 'The user declined to save this workflow. Nothing was written.' }
+      }
+      const path = writeSaved(cwd, scope, {
+        name: workflowName, description,
         ...typeof args.whenToUse === 'string' ? { whenToUse: args.whenToUse } : {},
         ...typeof args.args === 'object' && args.args !== null ? { args: args.args as never } : {},
       }, script)
-      return { ok: true, text: `Saved "${String(args.name)}" at ${describePath(cwd, path)}. Run it with create_workflow { saved: { name: "${String(args.name)}" } }.` }
+      return { ok: true, text: `Saved "${workflowName}" at ${describePath(cwd, path)}. Run it with create_workflow { saved: { name: "${workflowName}" } }.` }
     },
   })
 
@@ -564,9 +607,26 @@ export function registerWorkflowTools(deps: ToolDeps): void {
         const agent = requireAgent(exec, 'eval_workflow_snippet')
         gate(agent, 'eval_workflow_snippet')
         const cwd = agent.session.header.cwd ?? process.cwd()
-        const code = typeof args.code === 'string' ? args.code : typeof args.path === 'string' ? readScriptFile(cwd, args.path).text : undefined
-        if (code === undefined) throw new Error('Pass `code` or `path`.')
-        const result = await snippets.run(code, cwd, Math.max(1000, Math.min(600_000, int(args.timeoutMs) ?? 60_000)), exec.signal)
+        const hasCode = typeof args.code === 'string'
+        const hasPath = typeof args.path === 'string'
+        if (hasCode === hasPath) throw new Error('Pass exactly one of `code` or `path`.')
+        const code = hasCode ? args.code as string : readScriptFile(cwd, args.path as string).text
+        const inspected = snippets.inspect(code)
+        if (!inspected.ok) return { ok: false, text: inspected.text }
+        if (inspected.prepared.worldRunCommands.length > 0) {
+          const display: WorkflowLaunchDisplay = { kind: 'dynamic-workflow-launch', tool: 'eval_workflow_snippet', ok: true, errorCount: 0, diagnostics: [], name: 'snippet' }
+          const decision = await confirmation.confirm(agent, {
+            tool: 'eval_workflow_snippet',
+            name: 'snippet',
+            scriptText: code,
+            display,
+            settings: { maxConcurrency: 4 },
+            allowAlways: false,
+            commands: inspected.prepared.worldRunCommands,
+          }, exec.signal)
+          if (decision.kind !== 'allow') return denied('eval_workflow_snippet', decision, display, '')
+        }
+        const result = await snippets.run(code, cwd, Math.max(1000, Math.min(600_000, int(args.timeoutMs) ?? 60_000)), exec.signal, inspected.prepared)
         return { ok: result.ok, text: result.text }
       },
     })

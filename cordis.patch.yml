@@ -3,11 +3,11 @@
 # declares `dsh.client.platform: web` with a `./client` export, the Web half
 # (lib/client.js — tool cards, confirm card, run panel) from the same entry.
 #
-# DSH's own `workflow` tool (tool-workflow, saved YAML workflows) is a
+# DSH's own `workflow` tool (tool-workflow, plain-JS PTC orchestration script) is a
 # different feature and stays enabled; the two do not share tool names.
 - insert:
     - id: dynamic-workflow
-      name: 'dsh-dynamic-workflow'
+      name: '@lonesigma1998/dsh-dynamic-workflow'
       config:
         # ask: confirm every launch (Allow / Always allow in this session / Deny / Refine)
         confirm: ask

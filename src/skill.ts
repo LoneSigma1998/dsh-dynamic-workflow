@@ -19,7 +19,14 @@ export function loadSkillContent(dir: string): LoadedSkill | undefined {
   const field = (key: string): string | undefined => {
     const line = new RegExp(`^${key}:\\s*(.*)$`, 'm').exec(front)?.[1]?.trim()
     if (line === undefined) return undefined
-    return line.startsWith('"') && line.endsWith('"') ? JSON.parse(line) as string : line
+    if (line.startsWith('"') && line.endsWith('"')) {
+      try {
+        return JSON.parse(line) as string
+      } catch {
+        return line.slice(1, -1)
+      }
+    }
+    return line
   }
   const description = field('description') ?? 'Authoring contract for dynamic-workflow scripts (create_workflow).'
   const whenToUse = field('when_to_use')

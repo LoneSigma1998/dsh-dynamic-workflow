@@ -7,12 +7,16 @@
 import { realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 type AppendPluginRecord = (session: unknown, type: string, data: unknown) => unknown
+type BuildForkSeed = (events: readonly SessionEvent[], boundary: number) => SessionEvent[]
 
 interface HostModules {
   /** `@deepseek-ai/dsh-session#appendPluginRecord`; null when unavailable. */
   appendPluginRecord: AppendPluginRecord | null
+  /** `@deepseek-ai/dsh-session#buildForkSeed`; null when unavailable. */
+  buildForkSeed: BuildForkSeed | null
   /** `@deepseek-ai/dsh-subagent#SUBAGENT_DESCRIPTOR_VERSION` (3 in DSH 0.2.2). */
   subagentDescriptorVersion: number
 }
@@ -42,9 +46,15 @@ async function importOptional(specifier: string): Promise<Record<string, unknown
 
 export async function loadHostModules(): Promise<HostModules> {
   if (modules !== undefined) return modules
-  const [session, subagent] = await Promise.all([importOptional('@deepseek-ai/dsh-session'), importOptional('@deepseek-ai/dsh-subagent')])
+  const [session, sessionFork, subagent] = await Promise.all([
+    importOptional('@deepseek-ai/dsh-session'),
+    importOptional('@deepseek-ai/dsh-session/fork'),
+    importOptional('@deepseek-ai/dsh-subagent'),
+  ])
+  const buildForkSeedCandidate = sessionFork?.buildForkSeed ?? session?.buildForkSeed
   modules = {
     appendPluginRecord: typeof session?.appendPluginRecord === 'function' ? session.appendPluginRecord as AppendPluginRecord : null,
+    buildForkSeed: typeof buildForkSeedCandidate === 'function' ? buildForkSeedCandidate as BuildForkSeed : null,
     subagentDescriptorVersion: typeof subagent?.SUBAGENT_DESCRIPTOR_VERSION === 'number' ? subagent.SUBAGENT_DESCRIPTOR_VERSION : 3,
   }
   for (const resume of waiting.splice(0)) resume()

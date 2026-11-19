@@ -35,6 +35,24 @@ async function main(): Promise<void> {
     assert.equal(bad.ok, false)
     assert.match(bad.text, /Diagnostics/)
     console.log('✓ snippet: agent() is outside the snippet facade → diagnostics, nothing runs')
+
+    // inspect detects world.run literal commands cleanly without executing
+    const roInspect = runner.inspect(`const f = await files.glob('src/**/*.ts'); return f.length`)
+    assert.equal(roInspect.ok, true)
+    if (roInspect.ok) assert.deepEqual(roInspect.prepared.worldRunCommands, [])
+    const runInspect = runner.inspect(`const out = await world.run('echo', ['hi']); return out.stdout.trim()`)
+    assert.equal(runInspect.ok, true)
+    if (runInspect.ok) assert.deepEqual(runInspect.prepared.worldRunCommands, ['echo'])
+    console.log('✓ snippet: inspect() extracts world.run commands accurately')
+
+    // aborting a snippet kills its world.run child process instead of hanging for 30 s
+    const controller = new AbortController()
+    const started = Date.now()
+    setTimeout(() => controller.abort(new Error('cancelled')), 250)
+    const cancelled = await runner.run(`await world.run('sleep', ['30'], { timeoutMs: 60_000 }); return 'done'`, cwd, 60_000, controller.signal)
+    assert.equal(cancelled.ok, false)
+    assert.ok(Date.now() - started < 5_000, `snippet abort took ${Date.now() - started} ms`)
+    console.log(`✓ snippet: aborting killed a 30 s world.run in ${Date.now() - started} ms`)
     console.log('SNIPPET OK')
   } finally {
     rmSync(cwd, { recursive: true, force: true })

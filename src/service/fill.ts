@@ -12,13 +12,15 @@ import {
   checkSiteStability,
   collectPhaseNames,
   collectSites,
+  collectWorldRunCommands,
   createWorkflowProgram,
   interpret,
   projectControlFlow,
   spliceHoleBody,
+  synthesizeAskSchemas,
   type CompileDiagnostic,
 } from '@zcode/dynamic-workflow'
-import { compileProgram } from './compile.ts'
+import { compileProgram, type CompiledScript } from './compile.ts'
 import type { LiveRun } from './run-service.ts'
 
 export type FillResult =
@@ -59,11 +61,34 @@ async function fillOnce(entry: LiveRun, input: { runId: string; holeId: string; 
   }
   const effective = createWorkflowProgram(spliced.text)
   const after = collectSites(effective)
+  // Schema synthesis (9002) and non-literal world.run commands (9003) are not checked by
+  // analyzeWorkflowScript: report them as structured compile_failed diagnostics instead of throwing.
+  const extraDiagnostics = [
+    ...synthesizeAskSchemas(effective, after).diagnostics,
+    ...collectWorldRunCommands(effective, after).diagnostics,
+  ]
+  if (extraDiagnostics.length > 0) {
+    return {
+      ok: false,
+      reason: 'compile_failed',
+      message: `The effective script did not compile (${extraDiagnostics.length} diagnostic${extraDiagnostics.length === 1 ? '' : 's'}); nothing was spliced and the hole is still waiting.`,
+      diagnostics: extraDiagnostics.map(diagnostic => mapToBody(diagnostic, spliced.insertedAtLine, spliced.insertedLines)),
+    }
+  }
   const stability = checkSiteStability(before, after, holeId, spliced.insertedAtLine, spliced.insertedLines)
   if (!stability.ok) {
     return { ok: false, reason: 'fill_ids_unstable', message: `The compiled effective script renumbered an existing site (${stability.detail}). This is a host fault, not a problem with the body; the hole is still waiting.` }
   }
-  const compiled = compileProgram(spliced.text, effective, after)
+  let compiled: CompiledScript
+  try {
+    compiled = compileProgram(spliced.text, effective, after)
+  } catch (error) {
+    return {
+      ok: false,
+      reason: 'compile_failed',
+      message: `${error instanceof Error ? error.message : String(error)}; nothing was spliced and the hole is still waiting.`,
+    }
+  }
   const code = compiled.holeBodies[holeId]
   if (code === undefined) return { ok: false, reason: 'fill_ids_unstable', message: `Lowering produced no body for ${holeId}; the hole is still waiting.` }
   const result = entry.engine.fillHole({

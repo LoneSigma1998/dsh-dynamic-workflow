@@ -53,6 +53,33 @@ export class NotificationDelivery {
     ctx.on('agent/turn-stopping', async ({ agent, turn, signal }: { agent: Agent; turn: number; signal: AbortSignal }) => {
       await this.onTurnStopping(agent, turn, signal)
     })
+    // Deliver notices queued while an owner session was unloaded as soon as that session comes back.
+    ctx.on('agent/created', ({ agent }: { agent: Agent }) => {
+      const id = agent.id as string
+      if ((this.queues.get(id)?.length ?? 0) === 0) return undefined
+      setTimeout(() => {
+        const queue = this.queues.get(id)
+        if (queue === undefined || queue.length === 0) return
+        const live = this.ctx.agents.get(id as SessionId)
+        if (live === undefined) return
+        this.queues.delete(id)
+        for (const notice of queue) {
+          try {
+            if (live.status === 'idle') live.followup(this.toMessage(notice))
+            else live.steer(this.toMessage(notice))
+          } catch (error) {
+            this.options.logger?.warn('dynamic-workflow: queued notification delivery to %s failed: %s', id, String(error))
+            this.enqueue(id, notice)
+          }
+        }
+      }, 0)
+      return undefined
+    })
+  }
+
+  /** Wake a hold-mode waiter so it re-checks `hasLiveRuns` (e.g. after fencing or unexpected settlement failure). */
+  wake(parentSessionId: string): void {
+    this.waiters.get(parentSessionId)?.wake()
   }
 
   /** Queue one notice for the owner and deliver it as soon as the owner can take it. */

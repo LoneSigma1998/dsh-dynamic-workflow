@@ -58,6 +58,8 @@ assert.equal(registration.id, pkg.name, 'registration id is the package name')
 const stylesheets = registration.meta?.().stylesheets ?? {}
 const cssText = Object.values(stylesheets).map(s => s.text({ asset: x => x })).join('')
 assert.ok(cssText.includes('.dwf-timeline'), 'stylesheet text delivered through meta')
+assert.ok(cssText.includes('.dwf-spine'), 'vertical spine styles included in client bundle')
+assert.ok(cssText.includes('.dwf-preset-chart'), 'preset dashboard artifact styles included in client bundle')
 const exportsObject = registration.factory(Object.assign((spec) => {
   required.add(spec)
   if (!PLATFORM.has(spec)) throw new Error(`require("${spec}") missed the module table`)
@@ -92,12 +94,13 @@ const ctx = {
 for (const name of exportsObject.inject) assert.ok(name in ctx, `injected service ${name} exists`)
 exportsObject.apply(ctx)
 const keys = registrations.map(r => `${r.options.name}:${r.options.key ?? r.options.priority ?? r.options.id}`)
-for (const expected of ['tool.call.toolview:create_workflow', 'tool.call.toolview:amend_workflow', 'tool.call.toolview:fill_workflow_hole', 'conversation.composer:-1', 'conversation.chat.node:dynamic-workflow-notice', 'conversation.chat.node:dynamic-workflow-run', 'sidebar.right.pane.tab:dsh-dynamic-workflow:run']) {
+for (const expected of ['tool.call.toolview:create_workflow', 'tool.call.toolview:amend_workflow', 'tool.call.toolview:fill_workflow_hole', 'conversation.composer:-1', 'conversation.chat.node:dynamic-workflow-notice', 'conversation.chat.node:dynamic-workflow-run', 'conversation.session.header.actions:dynamic-workflow-header', 'sidebar.right.pane.tab:dsh-dynamic-workflow:run']) {
   assert.ok(keys.includes(expected), `registered ${expected} (got ${keys.join(', ')})`)
 }
 assert.deepEqual(definitions.map(d => d.kind), ['dynamic-workflow-notice', 'dynamic-workflow-run'])
 assert.deepEqual(locales, [['dynamicWorkflow', ['zh', 'en']]])
 assert.equal(tabs[0]?.kind, 'dynamic-workflow-run')
+assert.equal(tabs[0]?.guide?.[0]?.id, 'home', 'right-sidebar guide entry registered')
 console.log(`✓ apply: ${keys.join(' · ')}; definition ${definitions[0].kind}; tab ${tabs[0].kind}`)
 
 // Render each registered component with fixture props.
@@ -111,7 +114,7 @@ const projection = ((initial) => {
   // rebuild the run list from the notice definition only. The card must still render without a run.
   return { get: () => value }
 })(state)
-const byKey = Object.fromEntries(registrations.map(r => [`${r.options.name}:${r.options.key ?? r.options.priority}`, r]))
+const byKey = Object.fromEntries(registrations.map(r => [`${r.options.name}:${r.options.key ?? r.options.priority ?? r.options.id}`, r]))
 const args = (values) => ({ isSealed: true, closed: () => true, has: k => k in values, complete: () => true, text: k => values[k], textPrefix: (k, n) => values[k]?.slice(0, n), value: k => values[k] })
 const common = { t, sessionId: 's1', useDisclosure: () => ({ expanded: true, setExpanded: () => undefined, toggle: () => undefined }), useProjection: (_k, sel) => (sel === undefined ? projection.get() : sel(projection.get())), openChild: () => undefined, openRun: () => undefined }
 const render = (key, props) => ReactDOMServer.renderToStaticMarkup(h(byKey[key].component, props))
@@ -124,8 +127,15 @@ assert.match(htmlResult, /dwf-card-head/)
 assert.doesNotMatch(htmlResult, /dwf-pill/, 'after launch the live timeline is the run node, not the tool card')
 const htmlBad = render('tool.call.toolview:create_workflow', { ...common, phase: 'result', callId: 'c2', toolName: 'create_workflow', block: { kind: 'tool-result', seq: 1, time: 0, callId: 'c2', name: 'create_workflow', args: args({}), call: { name: 'create_workflow', argsRaw: '{}' }, content: [{ type: 'text', text: 'x' }], isError: true, meta: fixtures.diagnostics } })
 assert.match(htmlBad, /dwf-diagnostics/)
-const htmlFill = render('tool.call.toolview:fill_workflow_hole', { ...common, phase: 'result', callId: 'c3', toolName: 'fill_workflow_hole', block: { kind: 'tool-result', seq: 1, time: 0, callId: 'c3', name: 'fill_workflow_hole', args: args({}), call: { name: 'fill_workflow_hole', argsRaw: '{"run_id":"r","hole_id":"h","body":"return 1"}' }, content: [], isError: false, meta: { kind: 'dynamic-workflow-launch', tool: 'fill_workflow_hole', ok: true, errorCount: 0, diagnostics: [], fill: { siteId: 'h', name: 'h' } } } })
+const htmlFill = render('tool.call.toolview:fill_workflow_hole', { ...common, phase: 'result', callId: 'c3', toolName: 'fill_workflow_hole', block: { kind: 'tool-result', seq: 1, time: 0, callId: 'c3', name: 'fill_workflow_hole', args: args({}), call: { name: 'fill_workflow_hole', argsRaw: '{"run_id":"r","hole_id":"h","script":"return 42"}' }, content: [], isError: false, meta: { kind: 'dynamic-workflow-launch', tool: 'fill_workflow_hole', ok: true, errorCount: 0, diagnostics: [], fill: { siteId: 'h', name: 'h' } } } })
 assert.match(htmlFill, /card\.fill/)
+assert.match(htmlFill, /return 42/, 'FillHoleRow reads the `script` argument')
+const htmlHeader = render('conversation.session.header.actions:dynamic-workflow-header', { ...common, openHome: () => undefined })
+assert.match(htmlHeader, /dwf-header-btn/)
+const htmlPaneHome = render('sidebar.right.pane.tab:dsh-dynamic-workflow:run', { ...common, useTabInfo: () => ({ tab: { navigation: { params: { sessionId: 's1' }, revision: 1 } } }) })
+assert.match(htmlPaneHome, /pane\.runs/)
+const htmlPaneEvicted = render('sidebar.right.pane.tab:dsh-dynamic-workflow:run', { ...common, useTabInfo: () => ({ tab: { navigation: { params: { sessionId: 's1', runId: 'evicted-run-1' }, revision: 2 } } }) })
+assert.match(htmlPaneEvicted, /evicted-run-1/, 'RunPane keeps evicted run selected to fetch from Host instead of kicking back to list')
 // the confirm selector and card
 const confirm = byKey['conversation.composer:-1']
 const pending = { kind: 'question', key: 'k', sessionId: 's1', questions: [{ id: 'dynamic-workflow-confirm', question: 'Run?' }], snapshot: () => ({ channel: 'waterfall', closed: false }), getSnapshot: () => ({ channel: 'waterfall', closed: false }), subscribe: () => () => undefined, answer: async () => undefined, dismiss: async () => undefined }
@@ -133,6 +143,11 @@ const matched = confirm.options.select({ sessionId: 's1', pendingInteraction: pe
 assert.ok(matched !== null, 'confirm selector claims dynamic-workflow-confirm')
 assert.equal(confirm.options.select({ sessionId: 's1', pendingInteraction: { ...pending, questions: [{ id: 'other' }] } }), null, 'other questions are left to ui-user-questions')
 assert.match(ReactDOMServer.renderToStaticMarkup(h(confirm.component, { matched, t })), /confirm\.allow/)
+const savePending = { ...pending, questions: [{ id: 'dynamic-workflow-confirm', question: 'Save?', options: [{ label: 'Allow' }, { label: 'Deny' }] }] }
+const saveMatched = confirm.options.select({ sessionId: 's1', pendingInteraction: savePending })
+const htmlSaveConfirm = ReactDOMServer.renderToStaticMarkup(h(confirm.component, { matched: saveMatched, t }))
+assert.doesNotMatch(htmlSaveConfirm, /confirm\.always/, 'save confirmation hides Always allow')
+assert.doesNotMatch(htmlSaveConfirm, /confirm\.refine/, 'save confirmation hides Refine')
 // the notice definition over a real notice message
 const notice = run.notices[0]
 const event = { type: 'user/message', seq: 5, time: 1, data: notice, surfaceOp: 'append' }

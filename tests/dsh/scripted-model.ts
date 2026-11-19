@@ -39,6 +39,10 @@ export interface RequestView {
   lastToolResult?: { name: string; text: string; isError: boolean }
   /** The request's abort signal (a handler that waits should honour it). */
   signal?: AbortSignal
+  /** Resolved provider & model on this request. */
+  provider: string
+  model: string
+  reasoningEffort?: string
   /** Whole system prompt text. */
   system: string
   messages: GenerateOptions['messages']
@@ -72,6 +76,9 @@ export function view(options: GenerateOptions): RequestView {
     tools: (options.tools ?? []).map(tool => tool.name),
     lastUser,
     ...lastToolResult === undefined ? {} : { lastToolResult },
+    provider: options.provider,
+    model: options.model,
+    ...(options as { reasoningEffort?: string }).reasoningEffort === undefined ? {} : { reasoningEffort: (options as { reasoningEffort?: string }).reasoningEffort },
     system,
     messages,
     ...options.signal === undefined ? {} : { signal: options.signal },
@@ -86,7 +93,19 @@ export class ScriptedModel extends LlmAdapter {
   }
 
   override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
-    return Promise.resolve({ provider, id: model, name: model, contextWindow: 200_000 })
+    return Promise.resolve({
+      provider,
+      id: model,
+      name: model,
+      contextWindow: 200_000,
+      reasoning: {
+        efforts: [
+          { id: 'low' as never, name: 'Low' },
+          { id: 'medium' as never, name: 'Medium' },
+          { id: 'high' as never, name: 'High' },
+        ],
+      },
+    })
   }
 
   async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {

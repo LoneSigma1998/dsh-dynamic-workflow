@@ -182,6 +182,31 @@ export function registerWorkflowRoutes(ctx: Context, deps: { service: RunService
             json(res, 200, { nodes })
             return
           }
+          // GET runs/:runId/artifacts — full user-facing artifact list (content + preset dashboards with spec & itemCount)
+          // GET runs/:runId/artifacts/:id/data?after=N&limit=200&fields=a,b — paged tagged report items for a dashboard preset
+          if (method === 'GET' && segments[0] === 'runs' && segments[2] === 'artifacts') {
+            const runId = segments[1]!
+            if (segments.length === 3) {
+              json(res, 200, { artifacts: deps.service.artifacts(runId) })
+              return
+            }
+            if (segments.length === 5 && segments[4] === 'data') {
+              const artifactId = segments[3]!
+              const afterParam = url.searchParams.get('after')
+              const limitParam = url.searchParams.get('limit')
+              const fieldsParam = url.searchParams.get('fields')
+              const after = afterParam === null ? undefined : Number(afterParam)
+              const limit = limitParam === null ? undefined : Number(limitParam)
+              const fields = fieldsParam === null || fieldsParam.trim() === '' ? undefined : fieldsParam.split(',').map(s => s.trim()).filter(Boolean)
+              const page = deps.service.artifactData(runId, artifactId, {
+                ...after !== undefined && Number.isFinite(after) && after >= 0 ? { afterSequence: after } : {},
+                ...limit !== undefined && Number.isFinite(limit) && limit >= 1 ? { limit } : {},
+                ...fields !== undefined && fields.length > 0 ? { fields } : {},
+              })
+              json(res, 200, page)
+              return
+            }
+          }
           // GET runs/:runId/events?after=N — the raw journal event log (paged)
           if (method === 'GET' && segments[0] === 'runs' && segments[2] === 'events') {
             const runId = segments[1]!
@@ -248,7 +273,7 @@ export function registerWorkflowRoutes(ctx: Context, deps: { service: RunService
           // POST sessions/:sessionId/saved/run — run a saved workflow from the GUI (ZCode's hub
           //   「运行」: the click is the consent; no model turn, no confirmation)
           if (method === 'POST' && segments[0] === 'sessions' && (segments[2] === 'routing' || (segments[2] === 'saved' && segments[3] === 'run'))) {
-            if (caller?.principal?.kind !== undefined && caller.principal.kind !== 'owner') {
+            if (caller?.principal?.kind !== 'owner') {
               json(res, 403, { ok: false, message: 'Only the owner can change workflows.' })
               return
             }
@@ -296,7 +321,7 @@ export function registerWorkflowRoutes(ctx: Context, deps: { service: RunService
           }
           // POST runs/:runId/stop | resume | retune
           if (method === 'POST' && segments[0] === 'runs' && segments.length === 3) {
-            if (caller?.principal?.kind !== undefined && caller.principal.kind !== 'owner') {
+            if (caller?.principal?.kind !== 'owner') {
               json(res, 403, { ok: false, message: 'Only the owner can control workflow runs.' })
               return
             }
@@ -309,7 +334,11 @@ export function registerWorkflowRoutes(ctx: Context, deps: { service: RunService
             if (action === 'retune') {
               const body = await readBody(req)
               const value = body.maxConcurrency
-              json(res, 200, deps.service.retune(runId, typeof value === 'number' ? value : null))
+              if (value !== null && (typeof value !== 'number' || !Number.isFinite(value) || value < 1)) {
+                json(res, 400, { ok: false, message: 'maxConcurrency must be a positive finite number or null.' })
+                return
+              }
+              json(res, 200, deps.service.retune(runId, value))
               return
             }
             if (action === 'configure') {

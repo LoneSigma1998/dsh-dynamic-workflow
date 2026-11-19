@@ -1,10 +1,12 @@
 /**
  * Right-sidebar run pane (page tab `dynamic-workflow-run`): the whole run on one surface —
- * header with status and controls, the full timeline (every pill, no roster cap), the per-phase
- * subagent roll with each transcript one click away, open questions and holes, reports,
- * artifacts, the outcome, and the script. Live state is the same `dynamicWorkflowRuns`
- * projection the card reads; the static parts (graph, script, name) come from the Host route.
- * Opened without params (a restored layout) it lists this session's runs.
+ * header with status and controls, the vertical commit-graph spine (collapsible phases, parallel
+ * branch tracks, 5-pill roster cap + grouped roll, each transcript one click away), open questions
+ * and holes, reports, artifacts (including live preset chart/table/metrics/board dashboards),
+ * per-subagent file changes, script steps, the outcome, and the script.
+ *
+ * Live state is the `dynamicWorkflowRuns` projection; static/durable state comes from the Host
+ * route so older runs evicted from the 8-run projection window remain inspectable and resumable.
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -12,11 +14,9 @@ import { Button, IconRefreshOutlineRegular, IconStopFillRegular, StateDot, TextS
 import type { CreateWorkflowCausalityGraph } from '../display/types.ts'
 import type { WorkflowRunState } from '../shared/runs/workflow-runs.ts'
 import type { Translate, UseProjection } from './host-types.ts'
-import { laneDisplayName } from './model/graph/lane-name.ts'
-import { phaseDisplayName } from './model/graph/phase-name.ts'
-import { buildWorkflowTimeline, type TimelinePill } from './model/timeline/timeline-model.ts'
-import { apiGet, apiPost, findRun, formatTokens, namerOf, reconcileRun, RUNS_PROJECTION, runDot, runStatusText, shortModel, stepDot, taskCounts } from './run-view.ts'
-import { Timeline } from './Timeline.tsx'
+import { buildWorkflowTimeline } from './model/timeline/timeline-model.ts'
+import { apiGet, apiPost, findRun, formatTokens, namerOf, reconcileRun, RUNS_PROJECTION, runDot, runStatusText, shortModel, taskCounts } from './run-view.ts'
+import { RunSpine } from './RunSpine.tsx'
 import { changedSettings, SettingsFields, type RunSettingsValue } from './Settings.tsx'
 import { ArtifactList, ChangesSection, ScriptSteps, useChanges, type ArtifactInfo } from './RunExtras.tsx'
 import { WorkflowsHome } from './SavedWorkflows.tsx'
@@ -28,9 +28,81 @@ export const RUN_TAB_ID = 'dsh-dynamic-workflow:run'
 export interface RunTabParams { sessionId: string; runId: string }
 
 interface RunDetail {
-  snapshot: { name: string; status: string; stopReason?: string; resumable?: boolean; live?: boolean; scriptPath?: string; logTail: string[]; artifacts: ArtifactInfo[] }
+  snapshot: {
+    name: string
+    status: string
+    stopReason?: string
+    resumable?: boolean
+    live?: boolean
+    scriptPath?: string
+    spentTokens?: number
+    maxConcurrency?: number
+    nodes?: { queued: number; running: number; completed: number; failed: number }
+    actors?: { siteId: string; ordinal: number; name?: string; sessionId?: string }[]
+    reports?: { count: number; preview: string[] }
+    result?: unknown
+    failure?: { code: string; message: string }
+    pendingQuestions?: { qid: string; question: string; actorName?: string }[]
+    openHoles?: { siteId: string; ordinal: number; name: string }[]
+    logTail: string[]
+    artifacts: ArtifactInfo[]
+  }
   script: string | null
   graph: CreateWorkflowCausalityGraph | null
+}
+
+/** Synthesize a `WorkflowRunState` from the durable SQLite snapshot when a run was evicted from the 8-run projection window. */
+function snapshotToRunState(runId: string, snapshot: RunDetail['snapshot']): WorkflowRunState {
+  const status = (snapshot.status === 'pending' || snapshot.status === 'running' || snapshot.status === 'completed' || snapshot.status === 'errored' || snapshot.status === 'stopped')
+    ? snapshot.status
+    : 'stopped'
+  const actorStatus = status === 'running' ? 'running' : 'completed'
+  return {
+    runId,
+    status,
+    ...snapshot.stopReason === undefined ? {} : { stopReason: snapshot.stopReason as NonNullable<WorkflowRunState['stopReason']> },
+    ...snapshot.resumable === true ? { resumable: true as const } : {},
+    actors: (snapshot.actors ?? []).map(actor => ({
+      siteId: actor.siteId,
+      ordinal: actor.ordinal,
+      status: actorStatus,
+      ...actor.name === undefined ? {} : { name: actor.name },
+      ...actor.sessionId === undefined ? {} : { sessionId: actor.sessionId },
+    })),
+    nodes: [],
+    usage: {
+      spentTokens: snapshot.spentTokens ?? 0,
+      nodesUsed: (snapshot.nodes?.completed ?? 0) + (snapshot.nodes?.failed ?? 0) + (snapshot.nodes?.running ?? 0),
+    },
+    ...snapshot.maxConcurrency !== undefined && snapshot.maxConcurrency > 0
+      ? { concurrency: { cap: snapshot.maxConcurrency, ceiling: snapshot.maxConcurrency, limit: snapshot.maxConcurrency } }
+      : {},
+    ...snapshot.result !== undefined ? { resultPreview: typeof snapshot.result === 'string' ? snapshot.result : JSON.stringify(snapshot.result) } : {},
+    ...snapshot.failure !== undefined ? { error: snapshot.failure.message } : {},
+    ...(snapshot.reports?.preview.length ?? 0) > 0
+      ? { reports: snapshot.reports!.preview.map((preview, idx) => ({ siteId: 'journal', ordinal: idx, preview })) }
+      : {},
+    ...snapshot.artifacts.length > 0
+      ? {
+        artifacts: snapshot.artifacts.map(a => ({
+          id: a.id,
+          kind: a.kind as NonNullable<WorkflowRunState['artifacts']>[number]['kind'],
+          version: a.version,
+          itemCount: a.itemCount ?? 0,
+          ...a.title === undefined ? {} : { title: a.title },
+          ...a.description === undefined ? {} : { description: a.description },
+          ...a.primary ? { primary: true as const } : {},
+        })),
+      }
+      : {},
+    ...(snapshot.pendingQuestions?.length ?? 0) > 0
+      ? { pendingQuestions: snapshot.pendingQuestions!.map(q => ({ qid: q.qid, question: q.question, ...q.actorName === undefined ? {} : { actorName: q.actorName } })) }
+      : {},
+    ...(snapshot.openHoles?.length ?? 0) > 0
+      ? { holes: snapshot.openHoles!.map(h => ({ siteId: h.siteId, ordinal: h.ordinal, name: h.name, state: 'waiting' as const })) }
+      : {},
+    lastEventSequence: 0,
+  }
 }
 
 export interface RunPaneInjected {
@@ -51,8 +123,8 @@ export function RunPane({ t, sessionId, useProjection, useTabInfo, openChild }: 
   useEffect(() => { if (params?.runId !== undefined) setSelected(params.runId) }, [params?.runId, tab.tab.navigation.revision])
   const runs = useProjection(RUNS_PROJECTION, state => state?.runs)
   const run = useProjection(RUNS_PROJECTION, state => findRun(state, { runId: selected }))
-  if (selected === undefined || (run === undefined && runs !== undefined && !runs.some(r => r.runId === selected))) {
-    return <RunList runs={runs ?? []} t={t} onSelect={setSelected} missing={selected !== undefined} sessionId={sessionId} />
+  if (selected === undefined) {
+    return <RunList runs={runs ?? []} t={t} onSelect={setSelected} missing={false} sessionId={sessionId} />
   }
   return <RunDetailView runId={selected} run={run} t={t} sessionId={sessionId} openChild={openChild} onBack={() => setSelected(undefined)} />
 }
@@ -87,6 +159,8 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
   const [scriptOpen, setScriptOpen] = useState(false)
   const names = useMemo(() => namerOf(t), [t])
   const status = projected?.status
+  const filled = projected?.holes?.filter(hole => hole.state === 'filled').length ?? 0
+  const artifactKey = (projected?.artifacts ?? []).map(a => `${a.id}@${a.version}`).join(',')
   const [refresh, setRefresh] = useState(0)
   const [notice, setNotice] = useState<string | undefined>(undefined)
   // a different run: drop the previous run's static half before the new one loads
@@ -95,10 +169,22 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
     const controller = new AbortController()
     apiGet<RunDetail>(`runs/${encodeURIComponent(runId)}`, controller.signal).then(setDetail, () => { if (!controller.signal.aborted) setDetail(null) })
     return () => controller.abort()
-    // refresh the static half when the run settles (artifacts, log tail)
-  }, [runId, status, refresh])
-  const run = useMemo(() => reconcileRun(projected, detail?.snapshot ?? undefined), [projected, detail])
+    // refresh the static half when the run settles, a hole is filled, or a new artifact version is published
+  }, [runId, status, filled, artifactKey, refresh])
+  const run = useMemo(() => {
+    if (projected !== undefined) return reconcileRun(projected, detail?.snapshot ?? undefined)
+    if (detail !== undefined && detail !== null) return snapshotToRunState(runId, detail.snapshot)
+    return undefined
+  }, [runId, projected, detail])
   const model = useMemo(() => (detail?.graph === undefined || detail.graph === null ? undefined : buildWorkflowTimeline(detail.graph, run)), [detail, run])
+  const artifacts = useMemo(() => {
+    if (detail === undefined || detail === null) return []
+    const liveById = new Map((projected?.artifacts ?? []).map(a => [a.id, a]))
+    return detail.snapshot.artifacts.map((artifact) => {
+      const live = liveById.get(artifact.id)
+      return live === undefined ? artifact : { ...artifact, itemCount: live.itemCount }
+    })
+  }, [detail, projected?.artifacts])
   const control = async (action: 'stop' | 'resume'): Promise<void> => {
     setBusy(true)
     try {
@@ -119,9 +205,8 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
       setNotice(String(error))
     } finally { setBusy(false) }
   }
-  const onOpenPill = (pill: TimelinePill): void => { if (pill.instance?.sessionId !== undefined) openChild(pill.instance.sessionId) }
   const counts = run === undefined ? undefined : taskCounts(run)
-  const changes = useChanges(runId, `${run?.status ?? ''}:${run?.usage.nodesUsed ?? 0}:${refresh}`)
+  const changes = useChanges(runId, `${run?.status ?? ''}:${run?.usage.nodesUsed ?? 0}:${filled}:${refresh}`)
   const changedBySession = new Map((changes ?? []).map(entry => [entry.sessionId, entry.files.length]))
   // Configure (ZCode's popover): a GUI revision of the settings, no model turn and no confirmation
   const configurable = run !== undefined && (run.status === 'running' || run.status === 'errored' || (run.status === 'stopped' && run.stopReason !== 'superseded'))
@@ -147,6 +232,18 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
       setNotice(String(error))
     } finally { setBusy(false); setRefresh(value => value + 1) }
   }
+  if (detail === null && projected === undefined) {
+    return (
+      <div className="dwf-pane">
+        <div className="dwf-pane-head">
+          <button type="button" className="dwf-link" onClick={onBack}>←</button>
+          <h3 className="dwf-pane-title">{runId}</h3>
+        </div>
+        <p className="dwf-muted">{t('pane.missing')}</p>
+      </div>
+    )
+  }
+  const unattributedQuestions = (run?.pendingQuestions ?? []).filter(q => model === undefined || q.actorSiteId === undefined || q.actorOrdinal === undefined)
   return (
     <div className="dwf-pane" data-run-status={run?.status ?? 'unknown'}>
       <div className="dwf-pane-head">
@@ -193,49 +290,18 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
         </div>
       ) : null}
       {notice !== undefined ? <p className="dwf-attention">{notice}</p> : null}
-      {model !== undefined ? <Timeline model={model} names={names} t={t} onOpenPill={onOpenPill} pins={50} maxPillRows={50} /> : null}
+      {model !== undefined ? <RunSpine model={model} run={run} names={names} t={t} openChild={openChild} changedBySession={changedBySession} /> : null}
 
-      {run !== undefined && (run.pendingQuestions?.length ?? 0) > 0 ? (
+      {unattributedQuestions.length > 0 ? (
         <section className="dwf-pane-section">
           <h4>{t('pane.questions')}</h4>
-          <ul className="dwf-plain-list">{run.pendingQuestions!.map(q => <li key={q.qid}><strong>{q.actorName ?? q.actorSiteId ?? '?'}</strong> — {q.question}</li>)}</ul>
+          <ul className="dwf-plain-list">{unattributedQuestions.map(q => <li key={q.qid}><strong>{q.actorName ?? q.actorSiteId ?? '?'}</strong> — {q.question}</li>)}</ul>
         </section>
       ) : null}
-      {run !== undefined && (run.holes?.length ?? 0) > 0 ? (
+      {model === undefined && run !== undefined && (run.holes?.length ?? 0) > 0 ? (
         <section className="dwf-pane-section">
           <h4>{t('pane.holes')}</h4>
           <ul className="dwf-plain-list">{run.holes!.map(h => <li key={`${h.siteId}@${h.ordinal}`}><StateDot state={h.state === 'filled' ? 'done' : 'warning'} size={10} /> {h.name}{h.type === undefined ? '' : ` · ${h.type}`}</li>)}</ul>
-        </section>
-      ) : null}
-
-      {model !== undefined ? (
-        <section className="dwf-pane-section">
-          <h4>{t('pane.agents')}</h4>
-          {model.stations.filter(station => station.pills.length > 0).map(station => (
-            <div key={station.id} className="dwf-roll">
-              <div className="dwf-roll-phase"><StateDot state={stepDot(station.status)} size={10} /> {phaseDisplayName(station.naming, names)}</div>
-              <ul className="dwf-plain-list">
-                {station.pills.map(pill => {
-                  const name = pill.runtimeName ?? laneDisplayName(pill.lane, names)
-                  const node = run?.nodes.find(n => pill.instance !== undefined && n.actorSiteId === pill.instance.siteId && n.actorOrdinal === pill.instance.ordinal && n.phase !== 'settled')
-                    ?? run?.nodes.filter(n => pill.instance !== undefined && n.actorSiteId === pill.instance.siteId && n.actorOrdinal === pill.instance.ordinal).at(-1)
-                  const session = pill.instance?.sessionId
-                  return (
-                    <li key={pill.key} className="dwf-roll-row">
-                      <StateDot state={stepDot(pill.status)} size={10} />
-                      {session !== undefined
-                        ? <button type="button" className="dwf-link" onClick={() => openChild(session)}>{name}</button>
-                        : <span>{name}</span>}
-                      {node?.toolCalls !== undefined && node.toolCalls > 0 ? <span className="dwf-muted">{t('pane.toolCalls', { count: node.toolCalls })}</span> : null}
-                      {node?.lastTool !== undefined ? <span className="dwf-muted">{t('pane.lastTool', { tool: node.lastTool.name })}</span> : null}
-                      {node?.cached === true ? <span className="dwf-muted">{t('pane.cached')}</span> : null}
-                      {session !== undefined && (changedBySession.get(session) ?? 0) > 0 ? <span className="dwf-change-badge">{t('changes.count', { count: changedBySession.get(session)! })}</span> : null}
-                    </li>
-                  )
-                })}
-              </ul>
-            </div>
-          ))}
         </section>
       ) : null}
 
@@ -248,9 +314,9 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
       {(run?.reports?.length ?? 0) > 0 ? (
         <section className="dwf-pane-section"><h4>{t('pane.reports')}</h4><ul className="dwf-reports">{run!.reports!.map((r, i) => <li key={`${r.siteId}@${r.ordinal}:${i}`}>{r.preview}</li>)}</ul></section>
       ) : null}
-      {detail !== undefined && detail !== null ? <ArtifactList runId={runId} artifacts={detail.snapshot.artifacts} t={t} /> : null}
+      {artifacts.length > 0 ? <ArtifactList runId={runId} artifacts={artifacts} t={t} /> : null}
       <ChangesSection runId={runId} changes={changes} t={t} openChild={openChild} />
-      <ScriptSteps runId={runId} revision={`${run?.status ?? ''}:${run?.usage.nodesUsed ?? 0}:${refresh}`} t={t} />
+      <ScriptSteps runId={runId} revision={`${run?.status ?? ''}:${run?.usage.nodesUsed ?? 0}:${filled}:${refresh}`} t={t} />
       {detail?.script !== undefined && detail.script !== null ? (
         <section className="dwf-pane-section">
           <button type="button" className="dwf-link" onClick={() => setScriptOpen(open => !open)}>{scriptOpen ? t('confirm.hideScript') : t('confirm.showScript')}</button>

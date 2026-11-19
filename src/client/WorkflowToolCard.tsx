@@ -240,8 +240,15 @@ export function FillHoleRow(props: Props) {
   const { expanded, toggle } = props.useDisclosure()
   const hole = display?.fill?.name ?? (props.phase === 'result' ? '' : props.block.args.text('hole_id') ?? '')
   const body = props.phase === 'result'
-    ? (() => { try { return String((JSON.parse(props.block.call?.argsRaw ?? '{}') as { body?: unknown }).body ?? '') } catch { return '' } })()
-    : props.block.args.text('body') ?? ''
+    ? (() => {
+      try {
+        const parsed = JSON.parse(props.block.call?.argsRaw ?? '{}') as { script?: unknown; path?: unknown; body?: unknown }
+        return String(parsed.script ?? parsed.path ?? parsed.body ?? '')
+      } catch {
+        return ''
+      }
+    })()
+    : props.block.args.text('script') ?? props.block.args.text('path') ?? props.block.args.text('body') ?? ''
   const running = props.phase !== 'result'
   const failed = display !== undefined && !display.ok
   return (

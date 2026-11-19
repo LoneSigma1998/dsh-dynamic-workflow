@@ -13,9 +13,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { MarkdownText, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Translate } from './host-types.ts'
+import { isPresetArtifactKind, PresetArtifactLoader } from './ArtifactPresets.tsx'
 import { API_ROUTE, apiGet } from './run-view.ts'
 
-export interface ArtifactInfo { id: string; kind: string; title?: string; primary: boolean; version: number; contentType?: string; bytes?: number }
+export interface ArtifactInfo {
+  id: string
+  kind: string
+  title?: string
+  description?: string
+  primary: boolean
+  version: number
+  contentType?: string
+  bytes?: number
+  spec?: unknown
+  itemCount?: number
+}
 
 const PREVIEW_MAX_BYTES = 256 * 1024
 
@@ -67,13 +79,16 @@ function formatBytes(bytes: number | undefined): string {
 }
 
 function ArtifactTile({ runId, artifact, t, initiallyOpen }: { runId: string; artifact: ArtifactInfo; t: Translate; initiallyOpen: boolean }) {
-  const kind = previewKind(artifact)
-  const [open, setOpen] = useState(initiallyOpen && kind !== undefined)
+  const presetKind = isPresetArtifactKind(artifact.kind) ? artifact.kind : undefined
+  const isPreset = presetKind !== undefined
+  const kind = isPreset ? undefined : previewKind(artifact)
+  const expandable = isPreset || kind !== undefined
+  const [open, setOpen] = useState(isPreset ? true : (initiallyOpen && kind !== undefined))
   const [body, setBody] = useState<string | undefined>(undefined)
   const [imageUrl, setImageUrl] = useState<string | undefined>(undefined)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
-    if (!open || kind === undefined || body !== undefined || imageUrl !== undefined) return
+    if (!open || isPreset || kind === undefined || body !== undefined || imageUrl !== undefined) return
     const controller = new AbortController()
     fetchArtifact(runId, artifact, true, controller.signal)
       .then(async (blob) => {
@@ -82,7 +97,7 @@ function ArtifactTile({ runId, artifact, t, initiallyOpen }: { runId: string; ar
       })
       .catch(() => { if (!controller.signal.aborted) setFailed(true) })
     return () => controller.abort()
-  }, [open, kind, runId, artifact, body, imageUrl])
+  }, [open, isPreset, kind, runId, artifact, body, imageUrl])
   useEffect(() => () => { if (imageUrl !== undefined) URL.revokeObjectURL(imageUrl) }, [imageUrl])
   const [saving, setSaving] = useState(false)
   const download = (): void => {
@@ -93,16 +108,21 @@ function ArtifactTile({ runId, artifact, t, initiallyOpen }: { runId: string; ar
     code: { copyLabel: t('copy'), copiedLabel: t('copied'), toolbarLabels: { codeLabel: t('codeBlock.title'), wrapLabel: t('codeBlock.wrap'), unwrapLabel: t('codeBlock.unwrap') } },
     footnotes: t('markdown.footnotes'),
   }), [t])
+  const metaParts = isPreset
+    ? [artifact.kind, artifact.itemCount !== undefined ? t('artifact.items', { count: artifact.itemCount }) : '', artifact.version > 1 ? `v${artifact.version}` : '']
+    : [artifact.kind === 'markdown' ? 'Markdown' : artifact.contentType ?? artifact.kind, formatBytes(artifact.bytes), artifact.version > 1 ? `v${artifact.version}` : '']
   return (
-    <div className="dwf-artifact" data-dwf-artifact={artifact.id} data-open={open ? '' : undefined}>
+    <div className="dwf-artifact" data-dwf-artifact={artifact.id} data-kind={artifact.kind} data-open={open ? '' : undefined}>
       <div className="dwf-artifact-head">
-        {kind !== undefined
+        {expandable
           ? <button type="button" className="dwf-artifact-title dwf-link" aria-expanded={open} onClick={() => setOpen(value => !value)}>{artifact.title ?? artifact.id}</button>
           : <span className="dwf-artifact-title">{artifact.title ?? artifact.id}</span>}
         {artifact.primary ? <span className="dwf-artifact-badge">{t('artifact.primary')}</span> : null}
-        <span className="dwf-muted">{[artifact.kind === 'markdown' ? 'Markdown' : artifact.contentType ?? artifact.kind, formatBytes(artifact.bytes), artifact.version > 1 ? `v${artifact.version}` : ''].filter(Boolean).join(' · ')}</span>
-        <button type="button" className="dwf-link dwf-artifact-download" disabled={saving} onClick={download} data-dwf-download="">{t('artifact.download')}</button>
+        <span className="dwf-muted">{metaParts.filter(Boolean).join(' · ')}</span>
+        {isPreset ? null : <button type="button" className="dwf-link dwf-artifact-download" disabled={saving} onClick={download} data-dwf-download="">{t('artifact.download')}</button>}
       </div>
+      {open && artifact.description !== undefined && artifact.description !== '' ? <p className="dwf-muted dwf-artifact-desc">{artifact.description}</p> : null}
+      {open && presetKind !== undefined ? <PresetArtifactLoader runId={runId} artifactId={artifact.id} kind={presetKind} spec={artifact.spec} {...artifact.itemCount === undefined ? {} : { itemCount: artifact.itemCount }} t={t} /> : null}
       {open && kind === 'image' && imageUrl !== undefined ? <img className="dwf-artifact-image" alt={artifact.title ?? artifact.id} src={imageUrl} /> : null}
       {open && kind === 'markdown' && body !== undefined ? <div className="dwf-artifact-body"><MarkdownText text={body} labels={labels} variant="compact" /></div> : null}
       {open && kind === 'text' && body !== undefined ? <pre className="dwf-code dwf-artifact-body">{body}</pre> : null}

@@ -7,7 +7,7 @@
 # different feature and stays enabled; the two do not share tool names.
 - insert:
     - id: dynamic-workflow
-      name: '@lonesigma1998/dsh-dynamic-workflow'
+      name: '@sigmacamellia/dsh-dynamic-workflow'
       config:
         # ask: confirm every launch (Allow / Always allow in this session / Deny / Refine)
         confirm: ask

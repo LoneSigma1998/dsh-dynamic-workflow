@@ -1,16 +1,31 @@
 {
-  "name": "@lonesigma1998/dsh-dynamic-workflow",
-  "version": "0.1.0",
-  "description": "ZCode-style dynamic workflows for DeepSeek Harness: the model writes a typechecked TypeScript orchestration script; the harness confirms it, runs it with one DSH child agent per subagent, journals every step to SQLite (resume / amend / holes / escalations), and draws it as a live timeline.",
+  "name": "@sigmacamellia/dsh-dynamic-workflow",
+  "version": "0.1.1",
+  "description": "Typechecked TypeScript multi-agent dynamic workflow plugin for DeepSeek Harness (DSH): parallel subagents, SQLite durable journal (resume / amend / holes / escalations), vertical spine timeline, and live dashboard artifacts. Ported from ZCode (Apache-2.0).",
   "license": "Apache-2.0",
   "type": "module",
   "icon": "./icon.svg",
+  "homepage": "https://github.com/LoneSigma1998/dsh-dynamic-workflow#readme",
+  "bugs": {
+    "url": "https://github.com/LoneSigma1998/dsh-dynamic-workflow/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "dynamic-workflow",
+    "workflow",
+    "multi-agent",
+    "ai-agents",
+    "typescript",
+    "zcode"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/LoneSigma1998/dsh-dynamic-workflow.git"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "access": "public"
   },
   "main": "lib/index.js",
   "exports": {
@@ -29,9 +44,11 @@
     "locale/*.json",
     "skills",
     "cordis.patch.yml",
+    "LICENSE",
     "README.md",
     "NOTICE.md",
-    "vendor/LICENSE-ZCode-Apache-2.0"
+    "vendor/LICENSE-ZCode-Apache-2.0",
+    "vendor/PATCHES.md"
   ],
   "dsh": {
     "bundle": {

@@ -1,167 +1,313 @@
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/LoneSigma1998/dsh-dynamic-workflow/main/icon.svg" alt="dsh-dynamic-workflow logo" width="68" height="68" />
+
 # dsh-dynamic-workflow
 
-把 ZCode 的 **dynamic workflow**（动态工作流）完整搬进 DeepSeek Harness（DSH），并用 DSH 可改写的 agent loop 做了几处 ZCode 做不到的增强。
+**面向 DeepSeek Harness（DSH）的强类型 TypeScript 多代理动态工作流插件**
 
-模型针对一个小的 facade 写一段 **TypeScript 编排脚本**（`agent()`、`.ask<T>()`、`files.*`、`git.*`、`world.run`、`report`、`artifact.*`、`phase()`、`hole<T>()`）。Host 先类型检查并画出阶段图，请用户确认，然后在沙箱子进程里运行：每个子代理是一个真实的 DSH 子 agent，每一步都写入 SQLite journal（可 resume / amend / 补留白 / 升级提问），结束时用 `<task-notification>` 把结果送回主代理；Web 端把整个运行画成 ZCode 式的横向时间线。
+*Typechecked TypeScript multi-agent dynamic workflow plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), ported from [ZCode](https://github.com/zai-org/ZCode) (Apache-2.0).*
 
-ZCode 的纯逻辑（编译器、分析器、引擎、沙箱，约 2.6 万行，Apache-2.0）原样放在 `vendor/`；DSH 侧重写的是 driver、run service、工具、通知和 UI。
+[![npm version](https://img.shields.io/npm/v/%40sigmacamellia%2Fdsh-dynamic-workflow?color=cb3837&logo=npm)](https://www.npmjs.com/package/@sigmacamellia/dsh-dynamic-workflow)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
+[![Node.js >= 24.9](https://img.shields.io/badge/node-%3E%3D24.9-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![DSH >= 0.2.2-rc.3](https://img.shields.io/badge/DSH-%3E%3D0.2.2--rc.3-4f46e5)](https://github.com/deepseek-ai/deepseek-harness)
+[![Publish to npm](https://github.com/LoneSigma1998/dsh-dynamic-workflow/actions/workflows/publish.yml/badge.svg)](https://github.com/LoneSigma1998/dsh-dynamic-workflow/actions/workflows/publish.yml)
 
-## 安装
+[快速开始](#快速开始) · [核心特性](#核心特性) · [界面预览](#界面预览) · [配置参考](#配置参考) · [DSH 原生增强](#dsh-原生增强) · [安全与限制](#安全边界与已知限制) · [开发与测试](#开发与测试) · [协议与致谢](#开源协议致谢与免责声明)
 
-需要 Node ≥ 24.9 与 DSH ≥ 0.2.2-rc.3。
+</div>
 
-### 方式一：从 GitHub Packages 安装（推荐）
+> [!NOTE]
+> 本项目为**非官方社区插件**，基于 [ZCode](https://github.com/zai-org/ZCode) 的 Apache-2.0 开源动态工作流引擎移植，并针对 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的可编程 Agent Loop 与插件体系做了原生重构与增强。与 DeepSeek 或 Z.AI / ZCode 官方无隶属或背书关系。
 
-首次安装前，在 `~/.npmrc` 配置 GitHub Packages（需带 `read:packages` 权限的 GitHub PAT）：
+---
 
-```ini
-@lonesigma1998:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=你的_GITHUB_PAT
+## 简介
+
+让主代理不再只能线性调用工具，而是针对一套精简的强类型 Facade 编写 **TypeScript 编排脚本**（`agent()`、`.ask<T>()`、`files.*`、`git.*`、`world.run`、`report()`、`artifact.*`、`phase()`、`hole<T>()`）：
+
+```mermaid
+flowchart LR
+    A["主代理编写 TS 编排脚本"] --> B["Host 类型检查 & 静态阶段图"]
+    B --> C["用户确认 / 调整并发与模型"]
+    C --> D["沙箱子进程运行工作流"]
+    D --> E["并行 DSH 子代理 & SQLite Journal"]
+    E --> F["右侧栏竖向 Spine & 实时看板"]
+    E --> G["终态 / 升级 / 留白通知回传主代理"]
 ```
 
-然后直接按包名安装：
+- **先验后跑**：Host 内置 TypeScript 编译器，先做完整类型检查并抽出静态阶段图，交由用户确认（可在确认卡上直接调整并发数和子代理模型，或打回修订）。
+- **真·子代理 & 可恢复持久化**：每个子代理都是独立的 DSH 子会话；每一步执行状态与结果持久化至 SQLite Journal，支持**中断续跑（Resume）**、**带缓存修订（Amend）**、**中途留白补全（Hole）**与**升级提问（Escalation）**。
+- **开箱即用**：编译产物自带打包好的 Host 半（`lib/index.js`）与 Web/Desktop 半（`lib/client.js`），与 DSH 内置的 `workflow`（纯 JS PTC 编排工具）工具名完全独立、互不冲突。
+
+---
+
+## 核心特性
+
+- **强类型 TypeScript 编排**：提供结构化输出 `.ask<T>()`、显式阶段 `phase()`、多路并行扇出、跨运行复用存档（Saved Workflows）与只读代码片段求值（`eval_workflow_snippet`）。
+- **SQLite 持久化 Journal**：支持进程崩溃 / 重启 / 额度耗尽后的断点续跑，以及带前缀缓存复用的热修订（Amend）；支持运行中途留白 `hole<T>()` 与升级提问。
+- **实时可视化与预设数据看板**：Web / Desktop 端内置工具卡、确认卡、独立 Turn 级运行卡、状态通知条与右侧栏**竖向 Spine 阶段轨**；支持 `artifact.chart` / `table` / `metrics` / `board` 增量实时渲染。
+- **DSH 原生深度增强**：Turn 边界闸门、Headless 保活、`<workflow-runs>` 增量上下文投影、进程级 AIMD 限流、写操作追踪、只读子代理 Persona 策略、前向兼容的 `ignorable` 进度记录。
+- **完整可追溯**：每个子代理的完整对话与文件改动 diff（`+行 / -行`）均可直接在 Web / Desktop 侧栏点开审查。
+
+---
+
+## 快速开始
+
+### 环境要求
+
+- **Node.js** `>= 24.9.0`
+- **DeepSeek Harness (DSH)** `>= 0.2.2-rc.3`
+
+### 安装方式一：Desktop 桌面端（推荐）
+
+无需配置任何 Token 或 `.npmrc`，直接在 DSH 桌面应用左侧栏打开 **Plugins → Add plugin**，输入包名即可安装：
+
+```text
+@sigmacamellia/dsh-dynamic-workflow
+```
+
+安装后即可在 Plugin Manager 中自动检测新版本并一键更新。
+
+### 安装方式二：CLI / Web / TUI / Headless
 
 ```sh
-dsh plugin --profile web add @lonesigma1998/dsh-dynamic-workflow        # 或 --profile headless / tui
+dsh plugin --profile web add @sigmacamellia/dsh-dynamic-workflow
 ```
 
-Desktop 桌面端在左侧栏 **Plugins → Add plugin** 中输入 `@lonesigma1998/dsh-dynamic-workflow` 即可安装，后续也支持在 Plugin Manager 内检测版本并一键更新。
+> 同样适用于 `--profile tui` 或 `--profile headless`；升级时直接运行 `dsh plugin --profile web update @sigmacamellia/dsh-dynamic-workflow`（或通过桌面端 Plugin Manager 更新）。
 
-### 方式二：本地源码构建安装
+<details>
+<summary>安装方式三：从本地源码构建安装（适合二次开发）</summary>
 
 ```sh
-npm install            # 只装构建/测试依赖（esbuild、typescript 5.9、zod、tsx…）
-npm run build          # → lib/index.js（Host 半，TypeScript 编译器已打包进去）+ lib/client.js（Web 半）
-dsh plugin --profile web add "$(pwd)"        # 或 --profile headless / tui；Desktop 可在 Add plugin 填绝对路径
+git clone https://github.com/LoneSigma1998/dsh-dynamic-workflow.git
+cd dsh-dynamic-workflow
+npm install
+npm run build
+dsh plugin --profile web add "$(pwd)"
 ```
 
-### 自动发布（GitHub Actions）
+> 桌面端可在 **Plugins → Add plugin** 中填入本地仓库的绝对路径。
 
-仓库已配置 [`.github/workflows/publish.yml`](.github/workflows/publish.yml)：使用 `npm version patch|minor` 更新版本号并推送 `v*` 标签（`git push --follow-tags`），或在 GitHub Actions 页面手动触发，会自动构建、运行引擎与 journal 契约测试并发布到 GitHub Packages（使用内置 `GITHUB_TOKEN`，无需额外 Secret）。
+</details>
 
-包的 `cordis.patch.yml` 会把 Host 半和 Web 半作为同一个 Loader entry（id `dynamic-workflow`）插入 profile。DSH 自带的 `workflow` 工具（纯 JS PTC 编排脚本）是另一个功能，不冲突。
+### 开始使用
 
-### 配置（`$DSH_HOME/profiles/<profile>/cordis.patch.yml`）
+安装并启用插件后，在任意会话中：
+
+- 直接输入 **`/workflow 深度审查 src/ 目录下的并发与错误处理逻辑`**
+- 或直接用自然语言告诉主代理：**“用工作流帮我分析这个仓库的架构并输出报告”**
+
+---
+
+## 界面预览
+
+以下截图均采自真实 DSH Web 与真实模型运行：
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="https://raw.githubusercontent.com/LoneSigma1998/dsh-dynamic-workflow/main/docs/screenshots/08-confirm-settings.png" alt="确认卡：静态阶段图与并发/模型内联调整" />
+      <p align="center"><sub><b>确认卡</b>：静态阶段图、脚本预览，支持内联调整并发数与子代理模型（改动可一键还原）</sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="https://raw.githubusercontent.com/LoneSigma1998/dsh-dynamic-workflow/main/docs/screenshots/09-run-pane-changes-steps.png" alt="运行面板：子代理改动与脚本步骤" />
+      <p align="center"><sub><b>右侧栏运行面板</b>：子代理文件改动 diff（+行 / −行）与脚本文件/命令步骤追踪</sub></p>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/LoneSigma1998/dsh-dynamic-workflow/main/docs/screenshots/06-big-run-page.png" alt="71 个任务大工作流完成后的运行卡与运行面板" />
+  <br />
+  <sub><b>中大型任务实测</b>：71 个任务、4 个阶段的并行代码审查运行卡与右侧栏详情面板</sub>
+</p>
+
+### 界面组件一览
+
+- **工具卡**（`create_workflow` / `amend_workflow`）：模型流式编写脚本时，阶段随 `phase("…")` 实时落轨；类型检查失败直接展示诊断信息。
+- **确认卡**：展示静态阶段图、并发数、子代理模型及完整脚本；支持 **运行 / 本会话始终允许 / 拒绝 / 提修改意见**，且可直接在卡上微调并发与模型。
+- **运行卡**：作为独立的 Turn 级对话节点（`groupTree: 'turn'`）常驻对话流（不随工具调用折叠），实时脉动展示运行进度，重启 Host 后可从持久化记录无损恢复。
+- **状态通知条**：主代理收到的 `<task-notification>`、升级提问、留白补全折叠为可展开单行状态条；子代理会话内明确标识为“工作流任务”。
+- **右侧栏运行面板**（可从顶部会话栏“工作流”按钮随时打开）：
+  - **竖向 Spine 阶段轨**：含并行分支轨道、分叉/汇合接头、阶段折叠、每阶段最多钉住 5 个子代理药丸 + 可展开分组名册（大扇出不撑爆侧栏），点击任意子代理即可直达完整子会话。
+  - **产物与预设看板**：支持 Markdown / 文本 / 图片内联预览与文件下载；`artifact.chart` / `table` / `metrics` / `board` 通过增量游标从 `report(item, id)` 实时渲染（折线/柱状/散点、线性/对数坐标、指标卡、去重表格、状态看板）。
+  - **脚本步骤 / 子代理改动 / 运行时配置**：支持查看脚本读了什么、跑了什么命令，按子代理查看文件 diff；运行中调整并发原地生效，调整模型自动开启带缓存复用的修订运行。
+- **工作流列表页**：汇总本会话运行、按会话切换触发策略（`routing`），以及全局 / 项目级存档工作流（支持一键直跑，免经模型、免二次确认）。
+
+---
+
+## 命令、工具与存储路径
+
+### 斜杠命令
+
+| 命令 | 说明 |
+|---|---|
+| `/workflow <任务描述>` | 启动工作流（在 `onDemand` 模式下同时激活工作流工具集） |
+| `/dwf list` | 列出当前会话的所有工作流运行 |
+| `/dwf stop <run_id>` | 停止指定运行中的工作流（同时终止其挂起的子代理与 `world.run` 子进程） |
+| `/dwf resume <run_id>` | 从 SQLite Journal 恢复已停止或中断的运行 |
+| `/dwf routing <explicit\|suggest\|auto>` | 为当前会话切换工作流触发策略（持久化在会话记录中） |
+
+### 注册的 Agent 工具
+
+| 类别 | 工具名 |
+|---|---|
+| 生命周期控制 | `create_workflow`、`amend_workflow`、`resume_workflow_run`、`stop_workflow_run` |
+| 中途交互 | `fill_workflow_hole`、`resolve_workflow_question` |
+| 查询与观测 | `get_workflow_run`、`list_workflow_runs` |
+| 存档与轻量求值 | `save_workflow`、`list_saved_workflows`、`eval_workflow_snippet` |
+
+### 本地存储位置
+
+| 数据 | 路径 |
+|---|---|
+| 工作流草稿 | `<cwd>/.dsh/workflow-drafts/` |
+| 沙箱入口文件 | `<cwd>/.dsh/workflow-runs/`（不可写时回落至系统临时目录） |
+| 存档工作流 | `<cwd>/.dsh/workflows/`（项目级）与 `$DSH_HOME/workflows/`（全局） |
+| SQLite Journal 与产物 | `$DSH_HOME/state/dynamic-workflow/` |
+
+---
+
+## 配置参考
+
+安装后会自动通过 `cordis.patch.yml` 注册为 `dynamic-workflow` 插件节点。你可以在 `$DSH_HOME/profiles/<profile>/cordis.patch.yml` 中按需调整：
 
 ```yaml
 - id: dynamic-workflow
+  name: '@sigmacamellia/dsh-dynamic-workflow'
   config:
-    confirm: ask              # ask（默认，每次启动都确认）| never（headless）| ask-or-allow
-    holdTurnWhileRunning: false   # headless/SDK 设 true：run 未结束前主代理的 turn 不关
-    skillGate: true           # 未加载 dynamic-workflows skill 前拒绝提交脚本
-    defaultMaxConcurrency: 8  # 默认按 CPU 2–16
-    readOnlySubagents: ['reviewer*']   # 这些 persona 的子代理只拿只读工具
-    governor: { initial: 8 }  # 进程级 AIMD 限流；false 关闭
-    quotaAutoResume: true     # 额度耗尽停下的 run 在重置后自动续跑（中文“额度已用尽”也识别）
-    mode: alwaysOn            # alwaysOn（默认）| onDemand（/workflow 之前不向模型提供工具）| disabled
-    routing: explicit         # explicit（默认，只在要求时）| suggest（先说明做法和大概成本再问）| auto（实质性任务默认用）
-    resultSchema: exact       # exact（默认，子代理结果结构原样发给模型）| relaxed（降到 DSH 子集，给不接受复杂 schema 的网关）
+    confirm: ask
+    holdTurnWhileRunning: false
+    skillGate: true
+    defaultMaxConcurrency: 8
+    readOnlySubagents: ['reviewer*']
+    governor: { initial: 8 }
+    quotaAutoResume: true
+    mode: alwaysOn
+    routing: explicit
+    resultSchema: exact
 ```
 
-`routing` 还可以按会话切换：`/dwf routing suggest`，或在右侧栏“工作流”列表页的“工作流触发方式”里点选（会写进会话记录，重开仍生效）。
+| 选项 | 默认值 | 说明 |
+|---|---|---|
+| `confirm` | `'ask'` | 启动确认策略：`ask`（每次确认）、`never`（无头/自动模式）、`ask-or-allow` |
+| `holdTurnWhileRunning` | `false` | 面向 Headless / SDK：设为 `true` 时，在工作流结束前保持主代理 Turn 不关闭，使升级提问、留白和终态通知在同一 Turn 内送达 |
+| `skillGate` | `true` | 要求模型先加载内置 `dynamic-workflows` Skill 再提交脚本，显著提升编排质量 |
+| `defaultMaxConcurrency` | 按 CPU `2–16` | 默认最大子代理并发数 |
+| `readOnlySubagents` | `[]` | 按 Persona 名称通配（如 `['reviewer*']`）限制子代理仅获得只读工具集 |
+| `governor` | `{ initial: 8 }` | 进程级 AIMD 限流治理器（按 `provider/model` 分桶，遇 429 自动降并发）；设为 `false` 关闭 |
+| `quotaAutoResume` | `true` | 因额度耗尽暂停的运行在额度重置后自动续跑（支持中英文额度耗尽提示识别） |
+| `mode` | `'alwaysOn'` | 工具暴露模式：`alwaysOn`（常驻）、`onDemand`（输入 `/workflow` 前不暴露工具）、`disabled` |
+| `routing` | `'explicit'` | 触发引导策略：`explicit`（仅明确要求时）、`suggest`（先评估方案与成本再征求同意）、`auto`（实质性复杂任务默认启用）；支持通过 `/dwf routing` 或侧栏按会话覆盖 |
+| `resultSchema` | `'exact'` | 结构化输出 Schema 传递方式：`exact`（原样下发）或 `relaxed`（降级至 DSH 子集以兼容受限网关） |
 
-## 用法
+---
 
-- 对主代理说“用工作流……”，或 `/workflow <要做的事>`。
-- `/dwf list` · `/dwf stop <run_id>` · `/dwf resume <run_id>`。
-- 工具：`create_workflow`、`amend_workflow`、`fill_workflow_hole`、`resume_workflow_run`、`stop_workflow_run`、`resolve_workflow_question`、`get_workflow_run`、`list_workflow_runs`、`save_workflow`、`list_saved_workflows`、`eval_workflow_snippet`。
-- 草稿保存在 `<cwd>/.dsh/workflow-drafts/`，存档工作流在 `<cwd>/.dsh/workflows/` 与 `$DSH_HOME/workflows/`，沙箱入口文件在 `<cwd>/.dsh/workflow-runs/`，journal 与产物在 `$DSH_HOME/state/dynamic-workflow/`。
+## DSH 原生增强
 
-## Web 界面
+在完整移植 ZCode 引擎的基础上，结合 DeepSeek Harness 的可编程 Hook 与插件能力实现了以下原生增强：
 
-以下截图都来自真实的 DSH 0.2.2-rc.4 Web 和真实模型（`docs/screenshots/`）。
-
-- **工具卡**（`create_workflow` / `amend_workflow`）：模型还在写脚本时，阶段随着 `phase("…")` 一站一站落到轨道上（打字光标）；确认前显示静态阶段图；类型检查失败时显示诊断。
-- **确认卡**（占据输入框位置）：静态阶段图、并发与子代理模型、脚本，按钮为 运行 / 本会话始终允许 / 拒绝 / 提修改意见（带反馈，不运行）。
-- **运行卡**（对话里独立的一行）：启动后由 `dynamicWorkflowRuns` 会话投影实时点亮——运行中的站会脉动、轨道行进，子代理是挂在站下的药丸，点开就在右侧栏打开它的对话；停止 / 续跑 / 打开详情；结束后显示结果与报告。DSH 会在一个 turn 结束后把它的工具调用折叠起来，而 run 比启动它的 turn 活得久，所以运行卡不放在工具卡里，而是作为 turn 级的对话节点（`groupTree: 'turn'`），始终可见；重启 Host 后从持久化的进度记录恢复。
-- **通知条**：送给主代理的 `<task-notification>`、升级、留白等消息显示为一行可展开的状态条（按界面语言显示摘要）；子代理对话里，工作流派给它的任务显示为“工作流任务”。
-- **右侧栏运行面板**（可通过顶部会话栏“工作流”按钮或右侧栏导览随时打开，即使会话还未运行过工作流）：
-  - **竖向 Spine 阶段轨**（带并行分支轨道与分叉/汇合接头、阶段折叠、每阶段最多钉住 5 个子代理药丸 + 可展开的分组名册，避免大扇出拉爆侧栏），内嵌待答问题、留白状态，点击子代理即可打开对话，并显示工具调用数、最近工具、缓存命中、改动文件数。
-  - 报告、结果 / 错误、脚本；超出实时投影窗口（8 个 run）的历史运行仍可直接从 SQLite 快照查看与续跑。
-  - **产物与预设看板**：Markdown、文本、图片直接预览，主产物默认展开；`artifact.chart` / `table` / `metrics` / `board` 预设看板通过增量游标从 `report(item, id)` 实时渲染（折线/柱状/散点、线性/对数坐标、指标卡、去重表格、状态看板）。下载会以文件形式保存，不打开新窗口。HTML 和 SVG 只显示源码，不在应用里渲染（与 ZCode 相同）；后端也只以纯文本或位图返回预览，并附带沙箱 CSP。
-  - **脚本步骤**：脚本自己读了哪些文件、搜了什么、跑了哪些命令。
-  - **子代理改动**：按子代理列出它通过文件工具改了哪些文件（+行 −行），点开看 diff。
-  - **配置**：运行中或停下后改并发和子代理模型。只改并发时原地生效；其余情况开一次修订运行，复用已完成的工作。
-- **确认卡上可直接改设置**：并发和子代理模型，改过的会显示“· 原为 X ↺”，点一下就能还原。
-- **列表页**（右侧栏“工作流”不指定运行时）：本会话的运行、工作流触发方式，以及保存的工作流（全局 / 本项目、最近几次运行、一键“运行”，不经模型、不再确认）。
-
-![确认卡里改设置](docs/screenshots/08-confirm-settings.png)
-![运行面板：子代理改动与脚本步骤](docs/screenshots/09-run-pane-changes-steps.png)
-
-## 相比 ZCode 的增强（DSH 原生）
-
-| 增强 | 做法 |
+| 增强能力 | 实现机制 |
 |---|---|
-| Turn 边界闸门 | `agent/turn-stopping`：主代理想结束 turn 但还欠某个 run 一个回答 / 补全时，注入一次 `<workflow-blocked>` 提醒，而不是靠定时器 |
-| Headless 保持 | `holdTurnWhileRunning`：run 存活期间主代理 turn 不关闭，升级、留白、终态通知都在同一 turn 内到达 |
-| 运行状态上下文 | `systemPrompt.context` 注入 `<workflow-runs>`（只在变化时重发）：模型始终知道哪些 run 在跑、在等它什么，无需轮询 |
-| 进程级限流 | `llm/stream` 上的 AIMD 治理器（每个 provider/model 一个桶），429 时整体降并发，主代理请求不排队 |
-| 写操作追踪 | `tools/pre-execute` 统计子代理工具调用与写入，导入缓存在首次写入工作区处截断 |
-| 只读子代理 | 按 persona 名配置只读工具集 |
-| 可重载的进度 | 进度写成 `ignorable` 的 plugin record（`appendPluginRecord`），任何 DSH 版本都能重新打开会话 |
-| 子代理即 DSH 子会话 | 每个子代理是带 `subagent/descriptor` 的一次性子会话：在 Web 里可直接打开它的完整对话，日志随会话持久化 |
+| **Turn 边界闸门** | 基于 `agent/turn-stopping`：主代理试图结束 Turn 但仍欠某运行一个升级回答或留白补全时，精确注入一次 `<workflow-blocked>` 提醒，不依赖轮询定时器 |
+| **Headless 保活** | `holdTurnWhileRunning` 让非交互场景在同一 Turn 内完整接住升级、留白与终态结果 |
+| **零轮询状态投影** | 通过 `systemPrompt.context` 增量注入 `<workflow-runs>`（仅状态变化时重发），主代理始终感知活跃运行 |
+| **进程级 AIMD 限流** | 在 `llm/stream` 层按 `provider/model` 分桶控流，遇 429 自动退避且保障主代理请求优先不排队 |
+| **写操作追踪与安全缓存** | `tools/pre-execute` 精确记录子代理工具调用与文件写入，Amend 缓存导入在首次写入工作区处安全截断 |
+| **只读子代理策略** | 支持按 Persona 名称强制裁剪为只读工具集，避免审查类子代理误改代码 |
+| **前向兼容持久化** | 运行进度以 `ignorable` 插件记录（`appendPluginRecord`）写入会话，任意版本 DSH 均可无损重开会话 |
+| **子代理即原生子会话** | 每个子代理都是带 `subagent/descriptor` 的原生子会话，可在 Web / Desktop 直接打开完整轨迹并随会话持久化 |
 
-## 测试
+---
 
-离线测试直接从相邻的 `../deepseek-harness` 源码跑真实的 DSH（先在那边 `pnpm install`；路径可用 `DSH_REPO` 指定）：
+## 实测表现与对照实验
+
+<details>
+<summary><b>中大型任务实测：让工作流审查本插件自身 <code>src/</code>（71 个任务，9 次跨重启续跑）</b></summary>
+
+在真实 DSH Web 中让模型“用工作流深度审查本仓库 `src/`”：
+
+- 模型生成 4 阶段脚本：按目录分组初审（15 个子代理）→ 逐条独立证伪复核（53 个子代理）→ 去重排序 → 汇总报告。
+- 共 **71 个任务**、并发 **16**、累计 **24.7M tokens**；中途 Host 因环境限时重启约 **9 次**，每次均从 SQLite Journal 无损续跑并从缓存重放已完成任务。
+- 最终定位 32 个真实问题（3 高 / 14 中 / 15 低，详见 [`docs/reviews/2026-11-18-src-deep-review.md`](./docs/reviews/2026-11-18-src-deep-review.md)），高危与中危已全部修复并补充回归测试。
+
+**实践建议**：Token 消耗主要取决于扇出粒度；确认卡会展示静态任务数，若单条发现拆出过多复核子代理，可在确认前使用**“提修改意见”**让模型合并复核批次。
+
+</details>
+
+<details>
+<summary><b>A/B 对照实验（单代理 vs 动态工作流）</b></summary>
+
+在埋入 14 个 bug 与 5 个诱饵的小型代码库上对比测试（详见 [`docs/eval/2026-11-18-ab-review.md`](./docs/eval/2026-11-18-ab-review.md)）：
+
+- 两组均命中 10–11 个埋入 bug，且均无诱饵误报；
+- 工作流组额外发现 1–3 个未埋设的真实边界问题；
+- 代价约为单代理的 15–25 倍 Token 与 4–5 倍耗时。
+
+**结论**：单次上下文就能装下的小型任务直接用主代理更划算；动态工作流更适合跨多目录大规模审查、并行重构、批量验证或需要断点续跑与独立子代理视角的复杂任务。
+
+</details>
+
+---
+
+## 安全边界与已知限制
+
+> [!WARNING]
+> - **`world.run` 执行边界**：编排脚本中通过 `world.run` 调用的命令由插件自身执行端口在宿主进程权限下运行（与 ZCode 一致），**不经过 DSH 的沙箱策略**。请务必在确认卡中审阅脚本内容后再批准运行。
+> - **“只读”角色需硬约束**：仅靠 Prompt 声明“只读审查员”在 `workspace-write` 模式下仍可能写入文件或执行 Shell。如需严格只读，请切换会话至只读模式或配置 `readOnlySubagents`。
+
+- **确认卡隔离**：`save_workflow` 与 `eval_workflow_snippet` 始终禁用“本会话始终允许”，与工作流启动确认严格隔离，避免一次授权意外放行后续脚本保存或任意命令片段求值。
+- **产物预览安全**：HTML 与 SVG 产物仅展示源码，不在前端直接渲染；预览接口仅返回纯文本或位图，并附带沙箱 CSP 响应头。
+- **子代理会话模型**：子代理对话为一次性只读轨迹记录；续跑与修订通过 SQLite Journal 重放驱动，而非在子代理对话内继续追加消息。
+
+---
+
+## 开发与测试
+
+离线集成测试直接连接同级目录的 `../deepseek-harness` 源码运行真实 DSH（可通过 `DSH_REPO` 环境变量覆盖路径）：
 
 ```sh
-npm test               # 引擎冒烟、治理器、加固回归、额度续跑、snippet、typed 工具 schema、9 个集成场景、wire 级端到端
-npm run test:bundle    # 集成场景 + wire 测试跑在打包后的 lib/index.js 上
-npm run test:client    # 按 Web shell 的方式加载 lib/client.js 并渲染每个组件
-npm run typecheck
-npm run test:vendor    # ZCode 引擎自带的 vitest（2037 个用例）+ ZCode 的 journal 契约套件跑在本插件的 SQLite journal 上（83 个）
+npm run typecheck      # Host + Web 双端 TypeScript 类型检查
+npm run build          # 构建 lib/index.js（含内置 TS 编译器）与 lib/client.js
+npm test               # 13 套核心与集成测试（引擎、限流、加固回归、续跑、wire 级端到端、审计回归等）
+npm run test:bundle    # 针对打包产物 lib/index.js 运行集成与 wire 测试
+npm run test:client    # 按 Web Shell 方式加载 lib/client.js 并验证组件渲染
+npm run test:vendor    # ZCode 引擎 2,037 个 vitest 用例 + 83 个 SQLite Journal 契约测试
 ```
 
-- **集成场景**（脚本化模型）：诊断、完整运行、升级提问、停止→续跑、amend 导入缓存、补留白、turn 闸门、headless 保持、其他会话不能控制别人的 run。
-- **与 ZCode 对齐的行为**：
-  - `drafts.ts` 跑在真实的 DSH 文件工具和“先读再改”策略上：编译失败后直接改草稿不需要重读；子代理改动的行数统计和 diff 准确。
-  - `amend-inflight.ts` 跑在 JSONL 持久化上：修订一个正在跑的运行时，在途任务在原会话的基础上继续，而不是从头重来。
-  - `budget.ts`：子代理的联网搜索预算。
-  - `modes.ts` 通过真实的命令运行时验证：onDemand 激活、按会话切换 routing、disabled。
-- **加固回归**（`tests/dsh/hardening.ts`）：产物 id 目录穿越被拒、另一个存活 Host 正在跑的 run 不会被当成孤儿、排队请求中止后不残留监听器、真实 ripgrep 下含 `:1:` 的文件名解析正确且与无 rg 时排除相同目录、停止 run 会杀掉它正在等的 `world.run` 子进程、任务计数包含表外节点。
-- **wire 级端到端**（`tests/dsh/wire.ts`）：真实的 `llm-pi-ai` 适配器（pi-ai，`anthropic-messages` 协议）经真实 HTTP 连到本地的 Anthropic 兼容网关（`tests/dsh/mock-anthropic.ts`），加上 `llm-retry`、JSONL 会话持久化、真实的 `skill` 工具。验证：skill 闸门先拒绝、加载 skill 后放行；所有工具 schema 经 pi-ai 转换后到达网关；网关 429 被吸收；用量进入 journal；会话 JSONL 经持久化后端读回；在一个全新的 Host 里 resume 会话后，运行卡片状态恢复、对话可继续。只有模型是模拟的。
+<details>
+<summary>真实模型端到端测试与自动发布流程</summary>
 
-**真实端到端**（真实 `dsh` + 真实模型；需要 Node ≥ 24.9、pnpm 和网络）：
+**真实端到端测试**（需配置 `.env`，参见 `.env.example`）：
 
 ```sh
-cp .env.example .env   # 填入网关地址、密钥、模型（.env 已被 gitignore）
-npm i -g @deepseek-ai/dsh@next pnpm
-DWF_E2E_INSTALL=1 npm run test:live          # headless：用 `dsh plugin add` 装进 headless profile 后跑
-node tests/e2e/web-live.mjs <work> <shots>   # Web：真实 `dsh web` + Playwright，逐个界面截图
+cp .env.example .env
+DWF_E2E_INSTALL=1 npm run test:live
+node tests/e2e/web-live.mjs <work-dir> <screenshots-dir>
 ```
 
-时间受限的 shell 里可分段：`DWF_E2E_KEEP=1 DWF_E2E_PHASE=run …` 先跑；若被截断，`--continue <dir>` 用 `--session-id` 重新打开同一个会话让它收尾（运行已结束则汇总，被中断则续跑）；最后 `--verify <dir>` 检查。
+**自动发布到 npm（GitHub Actions）**：
 
-`test:live` 会先探测网关（x-api-key / Bearer、模型名是否带 `[1m]` 后缀），在临时 `DSH_HOME` 和一个埋了 4 个 bug 的小仓库里让模型“用工作流”审查代码，然后检查 17 项：run 完成且用了 ≥2 个子代理、回答里找到埋下的 bug、每个子代理的对话都作为 DSH 会话持久化且可在 Web 打开、token 计量、草稿与沙箱入口文件、会话日志里的进度记录全部 `ignorable`、skill 先于 `create_workflow` 加载、`<task-notification>` 送达，最后用 `--session-id` 重新打开会话确认可重载。
-已在 DSH 0.2.2-rc.4 + `workbuddy/deepseek-v4.1-flash` 上跑通（17/17，`dsh plugin add` 安装与按路径插入两种方式都验证过）；Web 端从提问、流式草稿、确认、运行、完成、通知、运行面板到重启后恢复、打开子代理对话都在真实浏览器里走通。
+仓库已配置 [`.github/workflows/publish.yml`](./.github/workflows/publish.yml)（启用 npm Provenance 供应链校验）。发布新版本只需：
 
-### 中大型任务实测：让工作流审查本插件自己
+```sh
+npm version patch   # 或 minor / major
+git push origin main --follow-tags
+```
 
-在真实 Web 里让模型“用工作流深度审查本仓库 `src/`”。模型写出的脚本分 4 个阶段：按目录分组审查（15 个审查子代理）→ 每条候选发现交给一个独立子代理尝试证伪（53 个复核子代理）→ 去重排序 → 写报告。共 71 个任务、并发 16、24.7M tokens；中途 Host 被重启约 9 次（沙箱的时间限制），每次都从 journal 续跑，已完成的子代理从缓存重放。
+推送 `v*` 标签后，GitHub Actions 会自动校验版本一致、构建 Host/Web 产物、运行引擎与 Journal 契约测试，并发布 `@sigmacamellia/dsh-dynamic-workflow` 到公开 npm Registry。
 
-![大任务完成后的运行卡与运行面板](docs/screenshots/06-big-run-page.png)
+</details>
 
-它确认了 32 个问题（3 高 / 14 中 / 15 低，报告见 [`docs/reviews/2026-11-18-src-deep-review.md`](docs/reviews/2026-11-18-src-deep-review.md)），全部 3 个高危和全部 14 个中危都已修复并补了回归测试，另修了 3 个低危。复测时还发现：按路径插入插件时进度记录没有写进会话（`@deepseek-ai/dsh-session` 从插件目录解析不到），现在会退回到从 Host 入口解析同一个模块实例。
+---
 
-这次实测暴露的两点体验问题：
+## 开源协议、致谢与免责声明
 
-- **“只读”只是提示词**。子代理在 DSH 的 workspace-write 模式下仍能写文件、跑任意 shell（ZCode 同样没有只读 persona）。需要真正只读时，请把会话切到 DSH 的只读访问模式——子代理通过委派的沙箱模式继承它；或在插件配置里为审查类 persona 配只读工具集（见“只读子代理”）。
-- **token 消耗主要来自脚本的扇出方式**。“每条发现一个复核子代理”让 53 个子代理各自重读源码；确认卡会显示子代理数，可以在确认前用“提修改意见”让模型合并复核批次。
-
-## 对照实验
-
-同一模型、同一个埋了 14 个 bug 和 5 个诱饵的小仓库，不用工作流和用工作流各跑两次（`tests/eval/`，详见 [`docs/eval/2026-11-18-ab-review.md`](docs/eval/2026-11-18-ab-review.md)）：
-
-- 埋下的 bug 两组都找到 10–11 个，都没有误报诱饵。
-- 工作流组额外找到 1–3 个真实存在、但没有埋的边界问题。
-- 代价是约 15–25 倍的 token、4–5 倍的时间。
-
-在一个上下文装得下的小任务上，工作流主要是开销；更大规模下的分界点还没有测。
-
-## 已知限制
-
-- 桌面端：DSH 的 `desktop` profile 只能由 Electron 应用管理（CLI 连 `dsh plugin --profile desktop add` 都拒绝），所以没法在这里验收。桌面端运行的是同一套 Web 应用，Web 端的端到端覆盖了它的界面；安装和最终验收需要在桌面应用里进行。
-- `world.run` 的命令由插件自己的执行端口运行（与 ZCode 相同，命令在确认卡的脚本里可见），不经过 DSH 的沙箱策略。
-- 子代理对话的打开依赖 ui-subagent 的 `subagentchat` 标签页；不可用时退回主面板打开。子代理是一次性记录（只读），续跑由 run 的 journal 重放完成，而不是在子代理对话里继续发消息。
-- 样式同时用两种方式交付：DSH 0.2.2-rc.4 的插件 bundle 自行注入 `<style data-plugin>`，较新的源码读 `meta.stylesheets`；两种都提供。
+- **开源协议**：本项目基于 [**Apache License 2.0**](./LICENSE) 开源。
+- **上游致谢**：
+  - 感谢 [**ZCode**](https://github.com/zai-org/ZCode)（Copyright 2026 Z.AI Co., Ltd，Apache-2.0）开源的高质量动态工作流编译器、静态分析器、执行引擎、沙箱运行时与前端模型。完整的归属清单、修改说明与第三方组件声明见 [`NOTICE.md`](./NOTICE.md)、[`vendor/LICENSE-ZCode-Apache-2.0`](./vendor/LICENSE-ZCode-Apache-2.0) 及 [`vendor/PATCHES.md`](./vendor/PATCHES.md)。
+  - 感谢 [**DeepSeek Harness (DSH)**](https://github.com/deepseek-ai/deepseek-harness) 提供的可扩展插件与可编程 Agent Loop 架构。
+- **免责与商标声明**：本项目为独立的社区开源插件，与 DeepSeek、Z.AI / 智谱 AI（ZCode）无官方合作、赞助或背书关系；相关产品名称与商标均归各自权利人所有，仅用于说明兼容性与代码来源。

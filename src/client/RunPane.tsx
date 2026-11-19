@@ -129,25 +129,70 @@ export function RunPane({ t, sessionId, useProjection, useTabInfo, openChild }: 
   return <RunDetailView runId={selected} run={run} t={t} sessionId={sessionId} openChild={openChild} onBack={() => setSelected(undefined)} />
 }
 
+interface SessionRunRow {
+  runId: string
+  name: string
+  status: string
+  stopReason?: string
+  spentTokens: number
+  updated: number
+}
+
 function RunList({ runs, t, onSelect, missing, sessionId }: { runs: readonly WorkflowRunState[]; t: Translate; onSelect: (runId: string) => void; missing: boolean; sessionId: string }) {
+  const [rows, setRows] = useState<SessionRunRow[] | undefined>(undefined)
+  useEffect(() => {
+    const controller = new AbortController()
+    apiGet<{ runs: SessionRunRow[] }>(`sessions/${encodeURIComponent(sessionId)}/runs`, controller.signal)
+      .then(value => setRows(value.runs), () => undefined)
+    return () => controller.abort()
+  }, [sessionId, runs.length])
+  const liveById = new Map(runs.map(r => [r.runId, r]))
+  const items: { runId: string; name?: string; dot: 'done' | 'error' | 'ongoing' | 'warning' | 'idle'; statusText: string; tokens: number }[] = []
+  const seen = new Set<string>()
+  for (const run of [...runs].reverse()) {
+    const meta = rows?.find(r => r.runId === run.runId)
+    seen.add(run.runId)
+    items.push({
+      runId: run.runId,
+      ...meta?.name === undefined ? {} : { name: meta.name },
+      dot: runDot(run),
+      statusText: runStatusText(run, t),
+      tokens: Math.max(run.usage.spentTokens, meta?.spentTokens ?? 0),
+    })
+  }
+  for (const meta of rows ?? []) {
+    if (seen.has(meta.runId) || liveById.has(meta.runId)) continue
+    seen.add(meta.runId)
+    const dot = meta.status === 'completed' ? 'done' : meta.status === 'errored' || meta.status === 'failed' ? 'error' : meta.status === 'running' ? 'ongoing' : meta.status === 'stopped' ? 'warning' : 'idle'
+    const statusText = t(`status.${meta.status === 'failed' ? 'errored' : meta.status}` as Parameters<Translate>[0])
+    items.push({ runId: meta.runId, name: meta.name, dot, statusText, tokens: meta.spentTokens })
+  }
   return (
     <div className="dwf-pane">
       {missing ? <p className="dwf-muted">{t('pane.missing')}</p> : null}
-      <h3 className="dwf-pane-heading">{t('pane.runs')}</h3>
-      {runs.length === 0 ? <p className="dwf-muted">{t('pane.empty')}</p> : (
-        <ul className="dwf-run-list">
-          {[...runs].reverse().map(run => (
-            <li key={run.runId}>
-              <button type="button" className="dwf-run-list-item" onClick={() => onSelect(run.runId)}>
-                <StateDot state={runDot(run)} size={12} />
-                <span className="dwf-run-list-id">{run.runId.replace(/^dwfrun-/u, '').slice(0, 8)}</span>
-                <span className="dwf-muted">{runStatusText(run, t)}</span>
-                <span className="dwf-muted">{formatTokens(run.usage.spentTokens)}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <section className="dwf-pane-section">
+        <h4>{t('pane.runs')}</h4>
+        {items.length === 0 ? <div className="dwf-empty-card">{t('pane.empty')}</div> : (
+          <ul className="dwf-run-list">
+            {items.map(item => (
+              <li key={item.runId}>
+                <button type="button" className="dwf-run-list-item" onClick={() => onSelect(item.runId)}>
+                  <StateDot state={item.dot} size={10} />
+                  <span className="dwf-run-list-body">
+                    <span className="dwf-run-list-title">{item.name ?? item.runId.replace(/^dwfrun-/u, '').slice(0, 8)}</span>
+                    <span className="dwf-run-list-sub">
+                      <code className="dwf-run-list-id">{item.runId.replace(/^dwfrun-/u, '').slice(0, 8)}</code>
+                      <span>{item.statusText}</span>
+                      {item.tokens > 0 ? <span>{formatTokens(item.tokens)}</span> : null}
+                    </span>
+                  </span>
+                  <span className="dwf-run-list-arrow" aria-hidden>›</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       <WorkflowsHome sessionId={sessionId} t={t} onOpenRun={onSelect} />
     </div>
   )
@@ -236,10 +281,10 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
     return (
       <div className="dwf-pane">
         <div className="dwf-pane-head">
-          <button type="button" className="dwf-link" onClick={onBack}>←</button>
+          <button type="button" className="dwf-icon-btn" aria-label={t('confirm.back')} onClick={onBack}>←</button>
           <h3 className="dwf-pane-title">{runId}</h3>
         </div>
-        <p className="dwf-muted">{t('pane.missing')}</p>
+        <div className="dwf-empty-card">{t('pane.missing')}</div>
       </div>
     )
   }
@@ -247,7 +292,7 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
   return (
     <div className="dwf-pane" data-run-status={run?.status ?? 'unknown'}>
       <div className="dwf-pane-head">
-        <button type="button" className="dwf-link" onClick={onBack}>←</button>
+        <button type="button" className="dwf-icon-btn" aria-label={t('confirm.back')} onClick={onBack}>←</button>
         <h3 className="dwf-pane-title" title={runId}>{detail?.snapshot.name ?? runId}</h3>
         {run !== undefined ? (
           <span className="dwf-card-status">
@@ -319,7 +364,11 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
       <ScriptSteps runId={runId} revision={`${run?.status ?? ''}:${run?.usage.nodesUsed ?? 0}:${filled}:${refresh}`} t={t} />
       {detail?.script !== undefined && detail.script !== null ? (
         <section className="dwf-pane-section">
-          <button type="button" className="dwf-link" onClick={() => setScriptOpen(open => !open)}>{scriptOpen ? t('confirm.hideScript') : t('confirm.showScript')}</button>
+          <button type="button" className="dwf-disclosure-btn" aria-expanded={scriptOpen} onClick={() => setScriptOpen(open => !open)}>
+            <span className="dwf-disclosure-icon" aria-hidden>&lt;/&gt;</span>
+            <span>{scriptOpen ? t('confirm.hideScript') : t('confirm.showScript')}</span>
+            <span className="dwf-spine-chevron dwf-disclosure-chevron" data-open={scriptOpen ? '' : undefined} aria-hidden>▸</span>
+          </button>
           {scriptOpen ? <pre className="dwf-code">{detail.script}</pre> : null}
         </section>
       ) : null}

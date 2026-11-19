@@ -47,7 +47,7 @@ const SERIES_COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#
 function ChartView({ chart, t }: { chart: ProjectedChart; t: Translate }) {
   const allY = chart.series.flatMap(s => s.points.map(p => p.y))
   if (chart.baseline !== undefined && (chart.scale !== 'log' || chart.baseline.value > 0)) allY.push(chart.baseline.value)
-  if (allY.length === 0) return <p className="dwf-muted">{t('artifact.preset.empty')}</p>
+  if (allY.length === 0) return <div className="dwf-preset-empty">{t('artifact.preset.empty')}</div>
 
   const W = 460
   const H = 190
@@ -171,13 +171,16 @@ function ChartView({ chart, t }: { chart: ProjectedChart; t: Translate }) {
 }
 
 function MetricsView({ metrics, t }: { metrics: readonly ProjectedMetric[]; t: Translate }) {
-  if (metrics.every(m => m.value === undefined)) return <p className="dwf-muted">{t('artifact.preset.empty')}</p>
+  if (metrics.length === 0) return <div className="dwf-preset-empty">{t('artifact.preset.empty')}</div>
+  const pending = metrics.every(m => m.value === undefined)
   return (
-    <div className="dwf-metrics-grid" data-dwf-preset="metrics">
+    <div className="dwf-metrics-grid" data-dwf-preset="metrics" data-pending={pending ? '' : undefined}>
       {metrics.map(metric => (
         <div key={metric.field} className="dwf-metric-tile">
-          <span className="dwf-metric-label">{metric.label}</span>
-          <span className="dwf-metric-value">{formatCellValue(metric.value, metric.unit)}</span>
+          <span className="dwf-metric-label" title={metric.label}>{metric.label}</span>
+          <span className="dwf-metric-value">
+            {metric.value === undefined ? '—' : formatCellValue(metric.value, metric.unit)}
+          </span>
         </div>
       ))}
     </div>
@@ -185,7 +188,7 @@ function MetricsView({ metrics, t }: { metrics: readonly ProjectedMetric[]; t: T
 }
 
 function TableView({ table, t }: { table: ProjectedTable; t: Translate }) {
-  if (table.rows.length === 0) return <p className="dwf-muted">{t('artifact.preset.empty')}</p>
+  if (table.rows.length === 0) return <div className="dwf-preset-empty">{t('artifact.preset.empty')}</div>
   return (
     <div className="dwf-table-wrap" data-dwf-preset="table">
       <table className="dwf-table">
@@ -207,7 +210,7 @@ function TableView({ table, t }: { table: ProjectedTable; t: Translate }) {
 }
 
 function BoardView({ columns, t }: { columns: readonly ProjectedBoardColumn[]; t: Translate }) {
-  if (columns.every(col => col.cards.length === 0)) return <p className="dwf-muted">{t('artifact.preset.empty')}</p>
+  if (columns.every(col => col.cards.length === 0)) return <div className="dwf-preset-empty">{t('artifact.preset.empty')}</div>
   return (
     <div className="dwf-board" data-dwf-preset="board">
       {columns.map(col => (

@@ -32,8 +32,11 @@ import { stepDot } from './run-view.ts'
 
 export { SPINE_JOINT_PX, SPINE_TRACK_X, spineLayout, type SpineJoint, type SpineLayout, type SpineRailPiece, type SpineSection }
 
+const AVATAR_HUES = [221, 160, 32, 268, 338, 194, 14, 245] as const
+
 function avatarHue(index: number | undefined): number {
-  return ((index ?? 0) * 47 + 200) % 360
+  const n = Math.abs(index ?? 0)
+  return AVATAR_HUES[n % AVATAR_HUES.length]!
 }
 
 function questionKey(question: WorkflowRunPendingQuestion): string | undefined {
@@ -141,7 +144,7 @@ export const RunSpine = memo(function RunSpine({ model, run, names, t, openChild
     const rowBody = (
       <>
         {pill.laneClass === 'workspace'
-          ? <span className="dwf-avatar dwf-avatar-script" aria-hidden>{'{ }'}</span>
+          ? <span className="dwf-avatar dwf-avatar-script" aria-hidden>&gt;_</span>
           : <span className="dwf-avatar" aria-hidden style={{ ['--dwf-hue' as string]: avatarHue(pill.avatarIndex) }}>{initial}</span>}
         <span className="dwf-spine-pill-main">
           <span className="dwf-pill-name" title={name}>{name}</span>

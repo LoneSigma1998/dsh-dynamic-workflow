@@ -263,7 +263,7 @@ function applyWithDatabase(ctx: Context, config: Config, stateDir: string, db: R
         // this very request, so the model starts writing at once instead of spending a round
         // trip on the skill tool. Without tool-skill the sentence after it still says what to do.
         invocation.agent.followup(userMessage(
-          `/${WORKFLOW_SKILL_NAME} Use a dynamic workflow for this request. If the \`${WORKFLOW_SKILL_NAME}\` skill content is not in this conversation yet, load it with the skill tool first; then settle the topology, write the script and submit it with create_workflow.\n\nRequest: ${instructions}`,
+          `/${WORKFLOW_SKILL_NAME} Use a dynamic workflow for this request. If the \`${WORKFLOW_SKILL_NAME}\` skill content is not in this conversation yet, load it with the skill tool first.\n\nRequest:\n${instructions}\n\nDecide the subagent topology before writing any code: how many subagents, which of them share a context vs. need fresh eyes (for example: design/plan review, independent verification or audit), what typed result each one returns, and what deterministic \`world.run\` gates decide completion. Then write the script and submit it with \`create_workflow\` (do not use DSH's plain-JS \`workflow\` tool, and do not substitute \`subagent\`).`,
           { kind: 'user' },
         ))
         return { kind: 'success' }

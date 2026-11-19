@@ -141,7 +141,7 @@ export function WorkflowsHome({ sessionId, t, onOpenRun }: { sessionId: string; 
       <section className="dwf-pane-section" data-dwf-saved-list="">
         <h4>{t('saved.title')}</h4>
         {saved === undefined ? <p className="dwf-muted">{t('confirm.loading')}</p> : null}
-        {saved !== undefined && saved.items.length === 0 ? <p className="dwf-muted">{t('saved.empty')}</p> : null}
+        {saved !== undefined && saved.items.length === 0 ? <div className="dwf-empty-card">{t('saved.empty')}</div> : null}
         {groups.filter(group => group.items.length > 0).map(group => (
           <div key={group.scope}>
             <ul className="dwf-saved-list">

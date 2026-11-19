@@ -39,13 +39,15 @@ function subagentChatAddress(parentSessionId: string, childSessionId: string): s
 interface WorkflowHeaderButtonProps {
   t: Translate
   useProjection?: UseProjection
-  openHome: () => void
+  openHome: (activeRunId?: string) => void
 }
 
-/** Session-header entry button: 1-click access to Workflows Home (runs, routing mode, saved workflows) even in empty sessions. */
+/** Session-header entry button: jumps straight to the active run when one is live, else opens Workflows Home. */
 function WorkflowHeaderButton({ t, useProjection, openHome }: WorkflowHeaderButtonProps) {
   const runs = useProjection?.(RUNS_PROJECTION, state => state?.runs)
-  const running = (runs ?? []).filter(run => run.status === 'running' || run.status === 'pending').length
+  const activeRuns = (runs ?? []).filter(run => run.status === 'running' || run.status === 'pending')
+  const running = activeRuns.length
+  const latestActive = activeRuns.at(-1)?.runId
   const total = runs?.length ?? 0
   return (
     <Button
@@ -54,7 +56,7 @@ function WorkflowHeaderButton({ t, useProjection, openHome }: WorkflowHeaderButt
       className="dwf-header-btn"
       aria-label={t('header.open')}
       icon={<IconLayersOutlineRegular size={14} />}
-      onClick={openHome}
+      onClick={() => openHome(latestActive)}
       data-dwf-header-btn=""
     >
       <span>{t('header.workflows')}</span>
@@ -129,7 +131,7 @@ export function apply(ctx: ClientContext): void {
     id: 'dynamic-workflow-header',
     order: 50,
     locale: NS,
-    inject: ((sessionId: string) => ({ openHome: () => openRun(sessionId) })) as never,
+    inject: ((sessionId: string) => ({ openHome: (activeRunId?: string) => openRun(sessionId, activeRunId) })) as never,
   }, WorkflowHeaderButton as ComponentType<never>))
 
   // The run pane needs the right sidebar; without it the card's "Open details" is a no-op.

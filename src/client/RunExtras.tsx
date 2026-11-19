@@ -108,17 +108,25 @@ function ArtifactTile({ runId, artifact, t, initiallyOpen }: { runId: string; ar
     code: { copyLabel: t('copy'), copiedLabel: t('copied'), toolbarLabels: { codeLabel: t('codeBlock.title'), wrapLabel: t('codeBlock.wrap'), unwrapLabel: t('codeBlock.unwrap') } },
     footnotes: t('markdown.footnotes'),
   }), [t])
+  const typeBadge = isPreset ? artifact.kind : (artifact.kind === 'markdown' ? 'Markdown' : artifact.contentType ?? artifact.kind)
   const metaParts = isPreset
-    ? [artifact.kind, artifact.itemCount !== undefined ? t('artifact.items', { count: artifact.itemCount }) : '', artifact.version > 1 ? `v${artifact.version}` : '']
-    : [artifact.kind === 'markdown' ? 'Markdown' : artifact.contentType ?? artifact.kind, formatBytes(artifact.bytes), artifact.version > 1 ? `v${artifact.version}` : '']
+    ? [artifact.itemCount !== undefined && artifact.itemCount > 0 ? t('artifact.items', { count: artifact.itemCount }) : '', artifact.version > 1 ? `v${artifact.version}` : '']
+    : [formatBytes(artifact.bytes), artifact.version > 1 ? `v${artifact.version}` : '']
+  const metaText = metaParts.filter(Boolean).join(' · ')
   return (
     <div className="dwf-artifact" data-dwf-artifact={artifact.id} data-kind={artifact.kind} data-open={open ? '' : undefined}>
       <div className="dwf-artifact-head">
         {expandable
-          ? <button type="button" className="dwf-artifact-title dwf-link" aria-expanded={open} onClick={() => setOpen(value => !value)}>{artifact.title ?? artifact.id}</button>
+          ? (
+            <button type="button" className="dwf-artifact-toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+              <span className="dwf-spine-chevron" data-open={open ? '' : undefined} aria-hidden>▸</span>
+              <span className="dwf-artifact-title">{artifact.title ?? artifact.id}</span>
+            </button>
+          )
           : <span className="dwf-artifact-title">{artifact.title ?? artifact.id}</span>}
-        {artifact.primary ? <span className="dwf-artifact-badge">{t('artifact.primary')}</span> : null}
-        <span className="dwf-muted">{metaParts.filter(Boolean).join(' · ')}</span>
+        <span className="dwf-artifact-badge">{typeBadge}</span>
+        {artifact.primary ? <span className="dwf-artifact-badge dwf-artifact-badge-primary">{t('artifact.primary')}</span> : null}
+        {metaText !== '' ? <span className="dwf-artifact-meta dwf-muted">{metaText}</span> : null}
         {isPreset ? null : <button type="button" className="dwf-link dwf-artifact-download" disabled={saving} onClick={download} data-dwf-download="">{t('artifact.download')}</button>}
       </div>
       {open && artifact.description !== undefined && artifact.description !== '' ? <p className="dwf-muted dwf-artifact-desc">{artifact.description}</p> : null}
@@ -208,21 +216,27 @@ export function ScriptSteps({ runId, revision, t }: { runId: string; revision: s
   return (
     <section className="dwf-pane-section" data-dwf-steps="">
       <h4>{t('pane.steps', { count: nodes.length })}</h4>
-      <ul className="dwf-steps">
-        {visible.map(({ node, round }) => {
-          const kind = stepKindOf(node)
-          const text = stepText(node)
-          return (
-            <li key={`${node.siteId}@${node.ordinal}`} className="dwf-step-row" data-kind={kind}>
-              <StateDot state={stepDotOf(node.status)} size={10} />
-              <span className="dwf-step-kind">{t(`step.${kind}`)}</span>
-              <code className="dwf-step-text" title={text}>{text}</code>
-              {round > 1 ? <span className="dwf-muted">⟳{round}</span> : null}
-            </li>
-          )
-        })}
-      </ul>
-      {rows.length > COLLAPSED_ROWS ? <button type="button" className="dwf-link" onClick={() => setExpanded(value => !value)}>{expanded ? t('card.less') : t('pane.stepsMore', { count: rows.length - COLLAPSED_ROWS })}</button> : null}
+      <div className="dwf-surface-card">
+        <ul className="dwf-steps">
+          {visible.map(({ node, round }) => {
+            const kind = stepKindOf(node)
+            const text = stepText(node)
+            return (
+              <li key={`${node.siteId}@${node.ordinal}`} className="dwf-step-row" data-kind={kind}>
+                <StateDot state={stepDotOf(node.status)} size={9} />
+                <span className="dwf-step-kind">{t(`step.${kind}`)}</span>
+                <code className="dwf-step-text" title={text}>{text}</code>
+                {round > 1 ? <span className="dwf-step-round">⟳{round}</span> : null}
+              </li>
+            )
+          })}
+        </ul>
+        {rows.length > COLLAPSED_ROWS ? (
+          <div className="dwf-card-footer-action">
+            <button type="button" className="dwf-link" onClick={() => setExpanded(value => !value)}>{expanded ? t('card.less') : t('pane.stepsMore', { count: rows.length - COLLAPSED_ROWS })}</button>
+          </div>
+        ) : null}
+      </div>
     </section>
   )
 }
@@ -270,27 +284,37 @@ export function ChangesSection({ runId, changes, t, openChild }: { runId: string
     <section className="dwf-pane-section" data-dwf-changes="">
       <h4>{t('changes.title', { count: files })}</h4>
       {changes.map(entry => (
-        <div key={entry.sessionId} className="dwf-changes-agent">
-          <button type="button" className="dwf-link dwf-changes-actor" onClick={() => openChild(entry.sessionId)}>{entry.actor ?? entry.sessionId}</button>
-          <ul className="dwf-plain-list">
+        <div key={entry.sessionId} className="dwf-changes-agent dwf-surface-card">
+          <div className="dwf-changes-head">
+            <button type="button" className="dwf-changes-actor" onClick={() => openChild(entry.sessionId)}>
+              <span className="dwf-changes-actor-dot" aria-hidden />
+              <span>{entry.actor ?? entry.sessionId}</span>
+            </button>
+            <span className="dwf-changes-file-count">{entry.files.length}</span>
+          </div>
+          <ul className="dwf-change-list">
             {entry.files.map((file) => {
               const key = `${entry.sessionId}\u0000${file.path}`
+              const isOpen = open === key
               return (
-                <li key={key} className="dwf-change-file">
-                  <button type="button" className="dwf-change-row" aria-expanded={open === key} onClick={() => setOpen(value => (value === key ? undefined : key))}>
-                    <code className="dwf-step-text">{file.path}</code>
-                    {file.created ? <span className="dwf-change-badge">{t('changes.created')}</span> : null}
-                    {file.deleted ? <span className="dwf-change-badge">{t('changes.deleted')}</span> : null}
-                    {file.tooLarge ? <span className="dwf-muted">{t('changes.large')}</span> : <><span className="dwf-diff-add">+{file.added}</span><span className="dwf-diff-del">−{file.removed}</span></>}
+                <li key={key} className="dwf-change-file" data-open={isOpen ? '' : undefined}>
+                  <button type="button" className="dwf-change-row" aria-expanded={isOpen} onClick={() => setOpen(value => (value === key ? undefined : key))}>
+                    <span className="dwf-spine-chevron" data-open={isOpen ? '' : undefined} aria-hidden>▸</span>
+                    <code className="dwf-step-text dwf-change-path" title={file.path}>{file.path}</code>
+                    {file.created ? <span className="dwf-change-badge dwf-change-badge-new">{t('changes.created')}</span> : null}
+                    {file.deleted ? <span className="dwf-change-badge dwf-change-badge-del">{t('changes.deleted')}</span> : null}
+                    <span className="dwf-change-stats">
+                      {file.tooLarge ? <span className="dwf-muted">{t('changes.large')}</span> : <><span className="dwf-diff-add">+{file.added}</span><span className="dwf-diff-del">−{file.removed}</span></>}
+                    </span>
                   </button>
-                  {open === key ? <DiffView runId={runId} sessionId={entry.sessionId} path={file.path} t={t} /> : null}
+                  {isOpen ? <DiffView runId={runId} sessionId={entry.sessionId} path={file.path} t={t} /> : null}
                 </li>
               )
             })}
           </ul>
         </div>
       ))}
-      <p className="dwf-muted dwf-configure-hint">{t('changes.hint')}</p>
+      <p className="dwf-footnote">{t('changes.hint')}</p>
     </section>
   )
 }

@@ -23,7 +23,7 @@ import { ConfirmCard, selectConfirm } from './ConfirmCard.tsx'
 import type { ClientContext, Translate, UseProjection } from './host-types.ts'
 import { en, NS, zh, type DynamicWorkflowKey } from './locales.ts'
 import { NoticeChip, noticeDefinition } from './notice.tsx'
-import { RUN_TAB_ID, RUN_TAB_KIND, RunPane } from './RunPane.tsx'
+import { RUN_TAB_ID, RUN_TAB_KIND, RunPane, type OpenRunOptions } from './RunPane.tsx'
 import { RUN_NODE_KIND, RunNode, runNodeDefinition } from './RunNode.tsx'
 import { RUNS_PROJECTION } from './run-view.ts'
 import { FillHoleRow, WorkflowToolCard } from './WorkflowToolCard.tsx'
@@ -88,17 +88,22 @@ export function apply(ctx: ClientContext): void {
     const workspace = ctx.get('uiWorkspace') as ClientContext['uiWorkspace'] | undefined
     workspace?.openSession({ parentSessionId, childSessionId, mode: 'unknown' })
   }
-  const openRun = (sessionId: string, runId?: string, focusArtifactId?: string): void => {
+  const openRun = (sessionId: string, runId?: string, opts?: OpenRunOptions): void => {
     const sidebar = ctx.get('sidebarRight') as ClientContext['sidebarRight'] | undefined
     const params = runId === undefined
       ? { sessionId }
-      : { sessionId, runId, ...focusArtifactId === undefined ? {} : { focusArtifactId } }
+      : {
+        sessionId,
+        runId,
+        ...(opts?.artifactId === undefined ? {} : { focusArtifactId: opts.artifactId }),
+        ...(opts?.scriptLog === true ? { scriptLog: true } : {}),
+      }
     sidebar?.openTabIn(sessionId, RUN_TAB_KIND, { params })
   }
   const cardInject = (sessionId: string) => ({
     sessionId,
     openChild: (childSessionId: string) => openChild(sessionId, childSessionId),
-    openRun: (runId: string, focusArtifactId?: string) => openRun(sessionId, runId, focusArtifactId),
+    openRun: (runId: string, opts?: OpenRunOptions) => openRun(sessionId, runId, opts),
   })
 
   ctx.slots.inject('tool.call.toolview', function* () {

@@ -1,18 +1,19 @@
 /**
  * Vertical commit-graph spine for the right-sidebar run pane (ported from ZCode
- * `WorkflowRunPhaseList.tsx` + `workflowRunSpine.ts`, Apache-2.0, styled with DSH tokens).
+ * `WorkflowRunPhaseList.tsx` + `WorkflowRunPhasePills.tsx`, Apache-2.0, styled with DSH tokens).
  *
- *   - Running phases and waiting holes auto-expand; settled/pending phases collapse cleanly into a
- *     single row with stacked `AgentFace` tiles (`showCompletionMark`) and step fraction (`2/2 ▸`).
- *   - Per-phase pill stats (`toolCalls`, `tokens`, `lastTool`) match the pill's own `stepIds`
- *     (`graph.steps[].siteIds`) so multi-turn subagents never leak stats across phases.
+ *   - Running phases and waiting holes auto-expand; completed & pending phases stay cleanly
+ *     collapsed with a terminal/avatar cluster (`>_ [🟣✓] 2/2 ▸`).
+ *   - Expanded phase pills are sleek single-line stadium pills (`32px`, `rounded-full`):
+ *     `[AgentFace] 终审评审员                          2 个任务 ↗`
+ *     Clicking a subagent pill opens its conversation; clicking `>_ Script` opens the script logbook.
  */
 
 import { Fragment, memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CreateWorkflowCausalityGraph } from '../display/types.ts'
 import type { WorkflowRunPendingQuestion, WorkflowRunState } from '../shared/runs/workflow-runs.ts'
-import { AgentFace, ScriptCheckIcon } from './AgentFace.tsx'
+import { AgentFace, ScriptCheckIcon, TerminalGlyphIcon } from './AgentFace.tsx'
 import type { Translate } from './host-types.ts'
 import { laneDisplayName, type LaneNameFormatter } from './model/graph/lane-name.ts'
 import { phaseDisplayName } from './model/graph/phase-name.ts'
@@ -26,25 +27,29 @@ import {
 } from './model/timeline/roster-model.ts'
 import type { TimelinePill, TimelineStation, WorkflowTimelineModel } from './model/timeline/timeline-model.ts'
 import { SPINE_JOINT_PX, SPINE_TRACK_X, spineLayout, type SpineJoint, type SpineLayout, type SpineRailPiece, type SpineSection } from './model/timeline/spine-layout.ts'
-import { formatExactTokens, stepDot } from './run-view.ts'
+import { stepDot } from './run-view.ts'
 
 export { SPINE_JOINT_PX, SPINE_TRACK_X, spineLayout, type SpineJoint, type SpineLayout, type SpineRailPiece, type SpineSection }
-
-export interface JournalAskNode {
-  siteId: string
-  ordinal: number
-  kind: string
-  status: string
-  actorSiteId?: string
-  actorOrdinal?: number
-  actorSeq?: number
-  stats?: { tokens?: number; toolCalls?: number; turns?: number }
-}
 
 function questionKey(question: WorkflowRunPendingQuestion): string | undefined {
   return question.actorSiteId === undefined || question.actorOrdinal === undefined
     ? undefined
     : `${question.actorSiteId}@${question.actorOrdinal}`
+}
+
+/** Port of ZCode `pillActivity` (`timeline-pill-activity.ts`): counts asks & world-reads in this phase. */
+function pillActivityCounts(graph: CreateWorkflowCausalityGraph | null | undefined, pill: TimelinePill): { asks: number; reads: number } {
+  if (graph === undefined || graph === null) return { asks: 0, reads: 0 }
+  const stepsById = new Map(graph.steps.map(s => [s.id, s]))
+  let asks = 0
+  let reads = 0
+  for (const id of pill.stepIds) {
+    const step = stepsById.get(id)
+    if (step === undefined || step.kind === 'hole') continue
+    if (step.kind === 'world-read') reads += 1
+    else asks += 1
+  }
+  return { asks, reads }
 }
 
 function SpineJointRow({ joint, kind, pitch, gutter }: { joint: SpineJoint; kind: 'fork' | 'merge'; pitch: number; gutter: number }) {
@@ -80,19 +85,17 @@ export interface RunSpineProps {
   model: WorkflowTimelineModel
   graph?: CreateWorkflowCausalityGraph | null | undefined
   run: WorkflowRunState | undefined
-  askNodes?: readonly JournalAskNode[] | undefined
   names: LaneNameFormatter
   t: Translate
   openChild: (sessionId: string) => void
-  changedBySession?: ReadonlyMap<string, number>
+  onOpenWorkspace?: ((phaseId?: string) => void) | undefined
 }
 
-export const RunSpine = memo(function RunSpine({ model, graph, run, askNodes, names, t, openChild, changedBySession }: RunSpineProps) {
+export const RunSpine = memo(function RunSpine({ model, graph, run, names, t, openChild, onOpenWorkspace }: RunSpineProps) {
   const layout = useMemo(() => spineLayout(model), [model])
   const pendingQuestions = run?.pendingQuestions ?? []
 
-  // ZCode parity: auto-expand ONLY running stations & waiting holes; completed stations stay neatly
-  // collapsed with stacked avatar clusters so Artifacts & Result remain visible without scrolling.
+  // ZCode parity (`WorkflowRunPhaseList.tsx` L108-118): auto-expand ONLY running stations & waiting holes!
   const activeKey = model.stations
     .filter(station => station.status === 'running' || station.hole?.state === 'waiting')
     .map(station => station.id)
@@ -100,7 +103,6 @@ export const RunSpine = memo(function RunSpine({ model, graph, run, askNodes, na
   const activeIds = useMemo(() => (activeKey === '' ? [] : activeKey.split('\u0000')), [activeKey])
   const [open, setOpen] = useState<ReadonlySet<string>>(() => {
     if (activeIds.length > 0) return new Set(activeIds)
-    // Single-station run: expand the one station since collapsing a 1-row list saves nothing.
     return model.stations.length === 1 ? new Set([model.stations[0]!.id]) : new Set()
   })
   useEffect(() => {
@@ -126,15 +128,6 @@ export const RunSpine = memo(function RunSpine({ model, graph, run, askNodes, na
     })
   }, [])
 
-  // Map graph stepId -> runtime call siteId (`step.source ?? step.id`) so each phase's pill resolves ONLY its own ask/world nodes.
-  const stepSites = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const step of graph?.steps ?? []) {
-      map.set(step.id, step.source ?? step.id)
-    }
-    return map
-  }, [graph])
-
   const questionsByInstance = useMemo(() => {
     const map = new Map<string, WorkflowRunPendingQuestion[]>()
     for (const q of pendingQuestions) {
@@ -149,79 +142,64 @@ export const RunSpine = memo(function RunSpine({ model, graph, run, askNodes, na
     const name = pill.runtimeName ?? laneDisplayName(pill.lane, names)
     const session = pill.instance?.sessionId
     const isScript = pill.laneClass === 'workspace'
-    const ownSites = new Set(pill.stepIds.map(sid => stepSites.get(sid) ?? sid))
+    const openActor = !isScript && session !== undefined
+    const openScript = isScript && onOpenWorkspace !== undefined && pill.workspace !== undefined
+    const openable = openActor || openScript
+    const activity = pillActivityCounts(graph, pill)
+    const counts: string[] = []
+    if (!isScript && activity.asks > 0) counts.push(t('spine.tasks', { count: activity.asks }))
+    if (activity.reads > 0) counts.push(t('spine.reads', { count: activity.reads }))
 
-    // Live projection node for THIS phase's ask site(s)
-    const liveMatching = (run?.nodes ?? []).filter(n =>
-      pill.instance !== undefined
-      && n.actorSiteId === pill.instance.siteId
-      && n.actorOrdinal === pill.instance.ordinal
-      && (ownSites.size === 0 || ownSites.has(n.siteId)),
-    )
-    const liveNode = liveMatching.find(n => n.phase !== 'settled') ?? liveMatching.at(-1)
+    // While actively running, show the subagent's current live tool subtly next to task count
+    const liveTool = pill.status === 'running' && pill.instance !== undefined
+      ? (run?.nodes ?? []).find(n => n.actorSiteId === pill.instance!.siteId && n.actorOrdinal === pill.instance!.ordinal && n.phase !== 'settled')?.lastTool?.name
+      : undefined
+    if (liveTool !== undefined) counts.push(liveTool)
 
-    // Durable journal ask node(s) for THIS phase's ask site(s) (carries exact per-ask tokens + toolCalls)
-    const journalMatching = (askNodes ?? []).filter(n =>
-      pill.instance !== undefined
-      && n.actorSiteId === pill.instance.siteId
-      && n.actorOrdinal === pill.instance.ordinal
-      && ownSites.has(n.siteId),
-    )
-    const totalToolCalls = journalMatching.length > 0
-      ? journalMatching.reduce((sum, n) => sum + (n.stats?.toolCalls ?? 0), 0)
-      : (liveNode?.toolCalls ?? 0)
-    const totalTokens = journalMatching.reduce((sum, n) => sum + (n.stats?.tokens ?? 0), 0)
-
-    const changed = session === undefined ? 0 : (changedBySession?.get(session) ?? 0)
     const instanceKey = pillInstanceKey(pill)
     const questions = instanceKey === undefined ? [] : (questionsByInstance.get(instanceKey) ?? [])
-    const unreached = run !== undefined && run.status !== 'running' && run.status !== 'pending' && (pill.status === undefined || pill.status === 'pending')
 
     const rowBody = (
       <>
         {isScript
-          ? <span className="dwf-script-glyph" aria-hidden>&gt;_</span>
+          ? <TerminalGlyphIcon size={15} />
           : (
             <AgentFace
               avatarIndex={pill.avatarIndex}
               name={name}
               status={pill.status}
               showCompletionMark={pill.status === 'done'}
-              size={22}
+              size={18}
             />
           )}
-        <span className="dwf-spine-pill-main">
-          <span className="dwf-pill-name" title={name}>{name}</span>
-          <span className="dwf-spine-pill-meta">
-            {totalToolCalls > 0 ? <span>{t('pane.toolCalls', { count: totalToolCalls })}</span> : null}
-            {totalTokens > 0 ? <span>{t('card.tokens', { tokens: formatExactTokens(totalTokens) })}</span> : null}
-            {liveNode?.phase !== 'settled' && liveNode?.lastTool !== undefined ? <span>{t('pane.lastTool', { tool: liveNode.lastTool.name })}</span> : null}
-            {liveNode?.cached === true ? <span>{t('pane.cached')}</span> : null}
-            {changed > 0 ? <span className="dwf-change-badge">{t('changes.count', { count: changed })}</span> : null}
-          </span>
-        </span>
+        <span className="dwf-pill-name" title={name}>{name}</span>
+        {counts.length > 0 ? <span className="dwf-spine-pill-trailer">{counts.join(' · ')}</span> : null}
         {pill.asking === true ? <span className="dwf-pill-asking" aria-hidden>?</span> : null}
-        {isScript ? <ScriptCheckIcon done={pill.status === 'done'} /> : null}
-        {pill.status === 'running' ? <StateDot state="ongoing" size={10} /> : null}
-        {pill.status === 'failed' ? <StateDot state="error" size={10} /> : null}
-        {session !== undefined && pill.status === 'done' ? <span className="dwf-pill-open-arrow" aria-hidden>↗</span> : null}
+        <span className="dwf-pill-tail">
+          {isScript && pill.status === 'done' ? <ScriptCheckIcon done /> : null}
+          {pill.status === 'running' ? <StateDot state="ongoing" size={10} /> : null}
+          {pill.status === 'failed' ? <StateDot state="error" size={10} /> : null}
+          {openable ? <span className="dwf-pill-open-arrow" aria-hidden>↗</span> : null}
+        </span>
       </>
     )
     return (
       <div key={pill.key} className="dwf-spine-pill-wrap">
-        {session !== undefined ? (
+        {openable ? (
           <button
             type="button"
             className="dwf-spine-pill dwf-pill-button"
             data-status={pill.status ?? 'static'}
-            data-unreached={unreached ? '' : undefined}
-            onClick={() => openChild(session)}
-            aria-label={t('pill.open', { name })}
+            onClick={() => {
+              if (openScript) onOpenWorkspace!(pill.workspace?.phaseId)
+              else openChild(session!)
+            }}
+            aria-label={openScript ? t('pill.openScript') : t('pill.open', { name })}
           >
             {rowBody}
           </button>
         ) : (
-          <div className="dwf-spine-pill" data-status={pill.status ?? 'static'} data-unreached={unreached ? '' : undefined}>{rowBody}</div>
+          <div className="dwf-spine-pill" data-status={pill.status ?? 'static'}>{rowBody}</div>
         )}
         {questions.map(q => (
           <div key={q.qid} className="dwf-spine-question">
@@ -234,7 +212,6 @@ export const RunSpine = memo(function RunSpine({ model, graph, run, askNodes, na
   }
 
   const railColWidth = SPINE_TRACK_X + layout.gutter + 12
-  const settledRun = run !== undefined && run.status !== 'running' && run.status !== 'pending'
 
   return (
     <div className="dwf-spine" data-dwf-spine="">
@@ -249,12 +226,11 @@ export const RunSpine = memo(function RunSpine({ model, graph, run, askNodes, na
         const roll = hasDoor && isListed && roster !== undefined ? rosterRoll(roster) : undefined
         const name = phaseDisplayName(station.naming, names)
         const lampLeft = SPINE_TRACK_X + layout.pitch * station.track - 5
-        const unreachedStation = settledRun && !station.visited
 
         return (
           <Fragment key={station.id}>
             {section.fork !== undefined ? <SpineJointRow joint={section.fork} kind="fork" pitch={layout.pitch} gutter={layout.gutter} /> : null}
-            <section className="dwf-spine-section" data-phase-id={station.id} data-status={station.status ?? 'static'} data-unreached={unreachedStation ? '' : undefined}>
+            <section className="dwf-spine-section" data-phase-id={station.id} data-status={station.status ?? 'static'}>
               <div className="dwf-spine-rails" style={{ width: railColWidth }} aria-hidden>
                 {section.rails.map((piece, rIdx) => {
                   const x = SPINE_TRACK_X + layout.pitch * piece.track
@@ -280,7 +256,7 @@ export const RunSpine = memo(function RunSpine({ model, graph, run, askNodes, na
                       <span className="dwf-spine-cluster">
                         {station.pills.slice(0, ROSTER_DECK).map((pill) => {
                           if (pill.laneClass === 'workspace') {
-                            return <span key={pill.key} className="dwf-script-glyph dwf-script-glyph-sm" aria-hidden>&gt;_</span>
+                            return <TerminalGlyphIcon key={pill.key} size={14} className="dwf-terminal-icon-sm" />
                           }
                           const pName = pill.runtimeName ?? laneDisplayName(pill.lane, names)
                           return (
@@ -290,7 +266,7 @@ export const RunSpine = memo(function RunSpine({ model, graph, run, askNodes, na
                               name={pName}
                               status={pill.status}
                               showCompletionMark={pill.status === 'done'}
-                              size={18}
+                              size={16}
                               className="dwf-cluster-face"
                             />
                           )
@@ -325,7 +301,7 @@ export const RunSpine = memo(function RunSpine({ model, graph, run, askNodes, na
                           <span className="dwf-deck">
                             {more.deck.map((pill) => {
                               const pName = pill.runtimeName ?? laneDisplayName(pill.lane, names)
-                              return <AgentFace key={pill.key} avatarIndex={pill.avatarIndex} name={pName} status={pill.status} size={16} className="dwf-deck-face" />
+                              return <AgentFace key={pill.key} avatarIndex={pill.avatarIndex} name={pName} status={pill.status} size={15} className="dwf-deck-face" />
                             })}
                           </span>
                           <span className="dwf-pill-name">{isListed ? t('spine.hideRest', { count: more.count }) : t('pill.more', { count: more.count })}</span>

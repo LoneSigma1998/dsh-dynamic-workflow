@@ -362,3 +362,19 @@ export function ScriptCheckIcon({ done }: { done: boolean }) {
     </svg>
   ) : null
 }
+
+export function TerminalGlyphIcon({ size = 15, className }: { size?: number; className?: string }) {
+  return (
+    <svg aria-hidden className={className ?? 'dwf-terminal-icon'} width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m3 4.5 3.6 3.5L3 11.5M8.2 11.5h4.8" />
+    </svg>
+  )
+}
+
+export function PlayTriangleIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg aria-hidden width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="4.2 2.8 13.2 8 4.2 13.2 4.2 2.8" />
+    </svg>
+  )
+}

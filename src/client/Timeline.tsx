@@ -4,13 +4,14 @@
  * the rail, parallel phases as bands of branch tracks. Geometry and the model are ZCode's
  * (`model/timeline/*`, ported verbatim); this file is only the renderer.
  *
- * Uses ZCode's `AgentFace` tile avatar (`WorkflowAgentFace.tsx`, Apache-2.0) with corner completion
- * checkmark badge, dimmed unreached conditional pills, and subtle overflow hints.
+ * Follows ZCode Invariant 3 (`WorkflowAgentPill.tsx`): unvisited/pending pills keep 100% crisp
+ * surface & full-saturation `AgentFace` color with sleeping `dots` eyes and secondary label color
+ * (never washed-out opacity). Native scrollbar is hidden in favor of ZCode's 2px track bar.
  */
 
 import { memo, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
-import { AgentFace, ScriptCheckIcon } from './AgentFace.tsx'
+import { AgentFace, ScriptCheckIcon, TerminalGlyphIcon } from './AgentFace.tsx'
 import { laneDisplayName, type LaneNameFormatter } from './model/graph/lane-name.ts'
 import { phaseDisplayName } from './model/graph/phase-name.ts'
 import { pillStatusOf, rosterMore, stationRosterOf, ROSTER_DECK, ROSTER_PINS_CARD } from './model/timeline/roster-model.ts'
@@ -127,10 +128,10 @@ export interface TimelineProps {
   model: WorkflowTimelineModel
   names: LaneNameFormatter
   t: Translate
-  /** Whether the run has already reached a terminal state (dims unvisited branches cleanly). */
-  settled?: boolean
-  /** Open the transcript behind a pill (live runs only). */
+  /** Open the transcript behind a subagent pill (live/settled runs). */
   onOpenPill?: ((pill: TimelinePill) => void) | undefined
+  /** Open the script logbook for a `>_ Script` pill. */
+  onOpenWorkspace?: ((pill: TimelinePill) => void) | undefined
   /** Highest number of pills drawn per station before the "n more" row. */
   pins?: number
   /** Show at most this many pill rows (the card); the pane passes Infinity. */
@@ -142,9 +143,9 @@ function lampClass(station: TimelineStation): string {
   return `dwf-lamp dwf-lamp-${status}${station.hole === undefined ? '' : ' dwf-lamp-hole'}${station.typing === true ? ' dwf-lamp-typing' : ''}`
 }
 
-export const Timeline = memo(function Timeline({ model, names, t, settled = false, onOpenPill, pins = ROSTER_PINS_CARD, maxPillRows = 6 }: TimelineProps) {
+export const Timeline = memo(function Timeline({ model, names, t, onOpenPill, onOpenWorkspace, pins = ROSTER_PINS_CARD, maxPillRows = 6 }: TimelineProps) {
   const markerId = useId().replace(/[^\w-]/g, '')
-  const [hasEndOverflow, setHasEndOverflow] = useState(false)
+  const [scrollState, setScrollState] = useState<{ hasEnd: boolean; ratio: number; offset: number }>({ hasEnd: false, ratio: 1, offset: 0 })
   const layout = useMemo(() => timelineLayout(model.arcs, model.bands), [model])
   const geometry = useMemo(() => {
     const rails = railPieces(model, layout)
@@ -188,7 +189,9 @@ export const Timeline = memo(function Timeline({ model, names, t, settled = fals
       const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 2
       const fade = start && end ? 'both' : start ? 'start' : end ? 'end' : ''
       if (el.dataset.fade !== fade) el.dataset.fade = fade
-      setHasEndOverflow(end)
+      const ratio = el.scrollWidth > 0 ? Math.min(1, el.clientWidth / el.scrollWidth) : 1
+      const offset = el.scrollWidth > el.clientWidth ? el.scrollLeft / el.scrollWidth : 0
+      setScrollState(prev => (prev.hasEnd === end && Math.abs(prev.ratio - ratio) < 0.005 && Math.abs(prev.offset - offset) < 0.005 ? prev : { hasEnd: end, ratio, offset }))
     }
     update()
     el.addEventListener('scroll', update, { passive: true })
@@ -203,6 +206,7 @@ export const Timeline = memo(function Timeline({ model, names, t, settled = fals
   const height = layout.pillsTop + geometry.rows * (PILL_HEIGHT + PILL_GAP)
   const draft = model.draft !== undefined
   const anyDoneBeyond = model.stations.slice(-2).some(s => s.status === 'done')
+  const showTrackBar = scrollState.ratio < 0.99
   return (
     <div className="dwf-timeline-wrap">
       <div className="dwf-timeline-scroll" ref={scroller}>
@@ -232,9 +236,8 @@ export const Timeline = memo(function Timeline({ model, names, t, settled = fals
             const captionY = layout.banded ? layout.capY : lampY
             const roster = geometry.rosters[i]!
             const visible = roster.visible
-            const unreachedStation = settled && !station.visited
             return (
-              <div key={station.id} className="dwf-station" data-status={station.status ?? 'static'} data-unreached={unreachedStation ? '' : undefined} style={{ left: x, width: STATION_WIDTH }}>
+              <div key={station.id} className="dwf-station" data-status={station.status ?? 'static'} style={{ left: x, width: STATION_WIDTH }}>
                 <span aria-hidden className={lampClass(station)} style={{ left: lampX(i, layout.inset) - x - 5, top: lampY - 5 }} />
                 <div className="dwf-station-caption" style={{ top: captionY - 10, left: layout.banded ? CAPTION_X : MARK_X + 7 }} title={name}>
                   <span className="dwf-station-name">{name}</span>
@@ -244,7 +247,7 @@ export const Timeline = memo(function Timeline({ model, names, t, settled = fals
                   {station.hole !== undefined ? <span className="dwf-station-meta dwf-hole-type">{station.hole.state === 'waiting' ? '…' : '✓'}</span> : null}
                 </div>
                 {visible.map((pill, k) => (
-                  <Pill key={pill.key} pill={pill} names={names} t={t} settled={settled} top={layout.pillsTop + k * (PILL_HEIGHT + PILL_GAP)} onOpen={onOpenPill} />
+                  <Pill key={pill.key} pill={pill} names={names} t={t} top={layout.pillsTop + k * (PILL_HEIGHT + PILL_GAP)} onOpen={onOpenPill} onOpenWorkspace={onOpenWorkspace} />
                 ))}
                 {roster.more !== undefined ? (
                   <div className="dwf-pill dwf-pill-more" style={{ top: layout.pillsTop + visible.length * (PILL_HEIGHT + PILL_GAP) }}>
@@ -263,39 +266,67 @@ export const Timeline = memo(function Timeline({ model, names, t, settled = fals
           })}
         </div>
       </div>
-      {hasEndOverflow ? (
+      {scrollState.hasEnd ? (
         <span className="dwf-timeline-more-badge" data-done={anyDoneBeyond ? '' : undefined} aria-hidden>
           <i /><b /><i />
         </span>
+      ) : null}
+      {showTrackBar ? (
+        <div className="dwf-timeline-bar" aria-hidden>
+          <span
+            className="dwf-timeline-thumb"
+            style={{
+              width: `${Math.max(12, scrollState.ratio * 100).toFixed(1)}%`,
+              left: `${(scrollState.offset * 100).toFixed(1)}%`,
+            }}
+          />
+        </div>
       ) : null}
     </div>
   )
 })
 
-function Pill({ pill, names, t, settled, top, onOpen }: { pill: TimelinePill; names: LaneNameFormatter; t: Translate; settled: boolean; top: number; onOpen?: ((pill: TimelinePill) => void) | undefined }) {
+function Pill({
+  pill,
+  names,
+  t,
+  top,
+  onOpen,
+  onOpenWorkspace,
+}: {
+  pill: TimelinePill
+  names: LaneNameFormatter
+  t: Translate
+  top: number
+  onOpen?: ((pill: TimelinePill) => void) | undefined
+  onOpenWorkspace?: ((pill: TimelinePill) => void) | undefined
+}) {
   const name = pill.runtimeName ?? laneDisplayName(pill.lane, names)
-  const openable = onOpen !== undefined && pill.instance?.sessionId !== undefined
   const isScript = pill.laneClass === 'workspace'
-  const unreached = settled && (pill.status === undefined || pill.status === 'pending')
+  const openActor = !isScript && onOpen !== undefined && pill.instance?.sessionId !== undefined
+  const openScript = isScript && onOpenWorkspace !== undefined && pill.workspace !== undefined
+  const openable = openActor || openScript
   const body = (
     <>
       {isScript
-        ? <span className="dwf-script-glyph" aria-hidden>&gt;_</span>
+        ? <TerminalGlyphIcon size={15} />
         : (
           <AgentFace
             avatarIndex={pill.avatarIndex}
             name={name}
             status={pill.status}
             showCompletionMark={pill.status === 'done'}
-            size={20}
+            size={18}
           />
         )}
       <span className="dwf-pill-name" title={name}>{name}</span>
       {pill.asking === true ? <span className="dwf-pill-asking" aria-hidden>?</span> : null}
-      {isScript ? <ScriptCheckIcon done={pill.status === 'done'} /> : null}
-      {pill.status === 'running' ? <StateDot state="ongoing" size={10} /> : null}
-      {pill.status === 'failed' ? <StateDot state="error" size={10} /> : null}
-      {openable && pill.status === 'done' ? <span className="dwf-pill-open-arrow" aria-hidden>↗</span> : null}
+      <span className="dwf-pill-tail">
+        {isScript && pill.status === 'done' ? <ScriptCheckIcon done /> : null}
+        {pill.status === 'running' ? <StateDot state="ongoing" size={10} /> : null}
+        {pill.status === 'failed' ? <StateDot state="error" size={10} /> : null}
+        {openable ? <span className="dwf-pill-open-arrow" aria-hidden>↗</span> : null}
+      </span>
     </>
   )
   return openable
@@ -304,10 +335,13 @@ function Pill({ pill, names, t, settled, top, onOpen }: { pill: TimelinePill; na
         type="button"
         className="dwf-pill dwf-pill-button"
         data-status={pill.status ?? 'static'}
-        data-unreached={unreached ? '' : undefined}
         style={{ top }}
-        onClick={() => onOpen!(pill)}
-        aria-label={t('pill.open', { name })}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (openScript) onOpenWorkspace!(pill)
+          else onOpen!(pill)
+        }}
+        aria-label={openScript ? t('pill.openScript') : t('pill.open', { name })}
       >
         {body}
       </button>
@@ -316,7 +350,6 @@ function Pill({ pill, names, t, settled, top, onOpen }: { pill: TimelinePill; na
       <div
         className="dwf-pill"
         data-status={pill.status ?? 'static'}
-        data-unreached={unreached ? '' : undefined}
         style={{ top }}
       >
         {body}

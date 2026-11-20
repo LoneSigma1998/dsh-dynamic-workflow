@@ -1,13 +1,12 @@
 /**
- * The live & completed run as an independent Chat node (ZCode visual parity + DSH turn placement).
+ * The live & completed run as an independent Chat node (100% ZCode `WorkflowRunDigest` parity):
  *
- *   - Clean single-row header: `[WorkflowGraphIcon] 工作流已完成 <title>` on the left,
- *     `<N> 个阶段 · <M> 个子代理` + `[💾 保存]` popover + `[⤢]` open-details icon on the right.
- *   - Horizontal timeline with `AgentFace` tiles and corner completion checkmarks.
- *   - NO raw JSON `Result` or raw JSON `report()` dump on completed runs (the main agent delivers
- *     the natural Markdown report right below in the conversation!).
- *   - Sleek artifact chips with proper type glyphs (`M↓`, table grid, metrics, chart) + a 4-column
- *     receipt bar (`总耗时 · 消耗 Tokens · 子代理 · 阶段`).
+ *   - Minimal single-row header: `[WorkflowGraphIcon] 工作流已完成 <title>` on the left,
+ *     `<N> 个阶段 · <M> 个子代理 · <tokens>` + `[⤢]` open-details button on the right.
+ *     (Save & Distill lives exclusively on the Run Detail page, keeping the chat card serene.)
+ *   - Horizontal timeline with full-saturation `AgentFace` stadium pills & bare `>_` terminal icon.
+ *   - Hairline divider + sleek artifact pills (`M↓`, table, chart, metrics, board) that jump
+ *     straight into the full-pane Artifact Reader on click.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -16,10 +15,9 @@ import type { CreateWorkflowCausalityGraph } from '../display/types.ts'
 import { ArtifactKindIcon, ExpandDiagonalIcon, WorkflowGraphIcon } from './AgentFace.tsx'
 import type { ConversationNodeDefinition, SessionEventLike, Translate, UseProjection } from './host-types.ts'
 import { buildWorkflowTimeline, type TimelinePill } from './model/timeline/timeline-model.ts'
-import { apiGet, apiPost, findRun, formatDuration, formatExactTokens, formatTokens, namerOf, reconcileRun, RUNS_PROJECTION, runKindText } from './run-view.ts'
-import { SaveWorkflowControls, type SavedRunRef } from './SavePopover.tsx'
+import type { OpenRunOptions } from './RunPane.tsx'
+import { apiGet, apiPost, findRun, formatExactTokens, formatTokens, namerOf, reconcileRun, RUNS_PROJECTION, runKindText } from './run-view.ts'
 import { Timeline } from './Timeline.tsx'
-import { useChanges } from './RunExtras.tsx'
 
 export const RUN_NODE_KIND = 'dynamic-workflow-run'
 const PROGRESS_RECORD = 'plugin:dynamic-workflow/progress'
@@ -83,9 +81,6 @@ interface RunDetail {
     artifacts?: RunCardArtifact[]
   }
   graph: CreateWorkflowCausalityGraph | null
-  durationMs?: number | null
-  savedAs?: SavedRunRef | null
-  canSave?: boolean
 }
 
 const details = new Map<string, Promise<RunDetail | null>>()
@@ -106,15 +101,14 @@ function detailOf(runId: string, revision: string): Promise<RunDetail | null> {
 export interface RunNodeInjected {
   sessionId?: string
   openChild: (childSessionId: string) => void
-  openRun: (runId: string, focusArtifactId?: string) => void
+  openRun: (runId: string, opts?: OpenRunOptions) => void
 }
 
-export function RunNode({ node, t, useProjection, sessionId, openChild, openRun }: { node: { data: RunNodeData }; t: Translate; useProjection: UseProjection } & RunNodeInjected) {
+export function RunNode({ node, t, useProjection, openChild, openRun }: { node: { data: RunNodeData }; t: Translate; useProjection: UseProjection } & RunNodeInjected) {
   const { runId } = node.data
   const projected = useProjection(RUNS_PROJECTION, state => findRun(state, { runId }))
   const names = useMemo(() => namerOf(t), [t])
   const [detail, setDetail] = useState<RunDetail | null | undefined>(undefined)
-  const [savedOverride, setSavedOverride] = useState<SavedRunRef | null | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | undefined>(undefined)
   const filled = projected?.holes?.filter(hole => hole.state === 'filled').length ?? 0
@@ -131,6 +125,9 @@ export function RunNode({ node, t, useProjection, sessionId, openChild, openRun 
   const onOpenPill = useCallback((pill: TimelinePill) => {
     if (pill.instance?.sessionId !== undefined) openChild(pill.instance.sessionId)
   }, [openChild])
+  const onOpenWorkspace = useCallback(() => {
+    openRun(runId, { scriptLog: true })
+  }, [openRun, runId])
   const control = async (action: 'stop' | 'resume'): Promise<void> => {
     setBusy(true)
     try {
@@ -144,17 +141,10 @@ export function RunNode({ node, t, useProjection, sessionId, openChild, openRun 
       setRefresh(value => value + 1)
     }
   }
-  const changes = useChanges(runId, `${projectedStatus ?? ''}:${filled}:${refresh}`)
-  const changedFiles = (changes ?? []).reduce((sum, entry) => sum + entry.files.length, 0)
   const title = detail?.snapshot.name ?? runId
-  const settled = run !== undefined && run.status !== 'running' && run.status !== 'pending'
   const stationsCount = model?.stations.length ?? 0
   const agentsCount = run?.actors.length ?? (graph?.lanes.filter(lane => lane.id !== 'workspace' && lane.id !== 'unknown').length ?? 0)
   const totalTokens = Math.max(run?.usage.spentTokens ?? 0, detail?.snapshot.spentTokens ?? 0)
-  const isZh = t('card.title') === '工作流'
-  const durationLabel = formatDuration(detail?.durationMs, isZh)
-  const savedAs = savedOverride !== undefined ? savedOverride : detail?.savedAs
-  const canSave = detail?.canSave === true && (run?.status === 'completed' || (savedAs !== null && savedAs !== undefined))
   const questions = run?.pendingQuestions?.length ?? 0
   const waitingHole = run?.holes?.find(hole => hole.state === 'waiting')
   const kindWord = runKindText(run, t)
@@ -162,6 +152,7 @@ export function RunNode({ node, t, useProjection, sessionId, openChild, openRun 
   const headerParts: string[] = []
   if (stationsCount > 0) headerParts.push(t('card.phases', { count: stationsCount }))
   if (agentsCount > 0) headerParts.push(t('card.agents', { count: agentsCount }))
+  if (totalTokens > 0) headerParts.push(t('card.tokens', { tokens: formatTokens(totalTokens) }))
 
   return (
     <section className="dwf-card dwf-run-node" data-dwf-run={runId} data-run-status={run?.status ?? 'unknown'}>
@@ -173,10 +164,9 @@ export function RunNode({ node, t, useProjection, sessionId, openChild, openRun 
         <span className="dwf-card-run-name" title={title}>{title}</span>
 
         <span className="dwf-card-actions">
-          {headerParts.length > 0 ? <span className="dwf-card-head-summary">{headerParts.join(' · ')}</span> : null}
-          {run?.status === 'running' && totalTokens > 0 ? (
-            <span className="dwf-card-live-tokens" title={`${formatExactTokens(totalTokens)} tokens`}>
-              {t('card.tokens', { tokens: formatTokens(totalTokens) })}
+          {headerParts.length > 0 ? (
+            <span className="dwf-card-head-summary" title={totalTokens > 0 ? `${formatExactTokens(totalTokens)} tokens` : undefined}>
+              {headerParts.join(' · ')}
             </span>
           ) : null}
           {run?.status === 'running' ? (
@@ -184,17 +174,6 @@ export function RunNode({ node, t, useProjection, sessionId, openChild, openRun 
           ) : null}
           {run?.status === 'stopped' && run.resumable === true ? (
             <Button size="sm" variant="ghost" icon={<IconRefreshOutlineRegular size={12} />} disabled={busy} onClick={() => { void control('resume') }}>{t('card.resume')}</Button>
-          ) : null}
-          {canSave ? (
-            <SaveWorkflowControls
-              runId={runId}
-              runName={detail?.snapshot.name}
-              sessionId={sessionId}
-              savedAs={savedAs}
-              t={t}
-              onSaved={saved => setSavedOverride(saved)}
-              onOpenRun={targetId => openRun(targetId === '' ? runId : targetId)}
-            />
           ) : null}
           <button
             type="button"
@@ -209,7 +188,7 @@ export function RunNode({ node, t, useProjection, sessionId, openChild, openRun 
       </header>
 
       {model !== undefined && model.stations.length > 0 ? (
-        <Timeline model={model} names={names} t={t} settled={settled} onOpenPill={onOpenPill} />
+        <Timeline model={model} names={names} t={t} onOpenPill={onOpenPill} onOpenWorkspace={onOpenWorkspace} />
       ) : null}
 
       {questions > 0 ? <p className="dwf-attention">{t('card.questions', { count: questions })}</p> : null}
@@ -229,45 +208,13 @@ export function RunNode({ node, t, useProjection, sessionId, openChild, openRun 
               key={`${artifact.id}@${artifact.version}`}
               className="dwf-artifact-pill"
               data-primary={artifact.primary ? '' : undefined}
-              onClick={() => openRun(runId, artifact.id)}
+              onClick={() => openRun(runId, { artifactId: artifact.id })}
               title={artifact.title ?? artifact.id}
             >
               <span className="dwf-artifact-pill-icon"><ArtifactKindIcon kind={artifact.kind} contentType={artifact.contentType} /></span>
               <span className="dwf-artifact-pill-label">{artifact.title ?? artifact.id}</span>
             </button>
           ))}
-          {changedFiles > 0 ? (
-            <button type="button" className="dwf-artifact-pill dwf-artifact-pill-subtle" onClick={() => openRun(runId)}>
-              <span className="dwf-artifact-pill-label">{t('changes.count', { count: changedFiles })}</span>
-            </button>
-          ) : null}
-        </div>
-      ) : changedFiles > 0 && settled ? (
-        <div className="dwf-artifact-strip">
-          <button type="button" className="dwf-artifact-pill dwf-artifact-pill-subtle" onClick={() => openRun(runId)}>
-            <span className="dwf-artifact-pill-label">{t('changes.count', { count: changedFiles })}</span>
-          </button>
-        </div>
-      ) : null}
-
-      {run?.status === 'completed' && (totalTokens > 0 || durationLabel !== undefined) ? (
-        <div className="dwf-receipt-figures" data-dwf-figures="">
-          <div className="dwf-figure">
-            <span className="dwf-figure-val">{durationLabel ?? '—'}</span>
-            <span className="dwf-figure-lbl">{t('figure.time')}</span>
-          </div>
-          <div className="dwf-figure" title={totalTokens > 0 ? `${formatExactTokens(totalTokens)} tokens` : undefined}>
-            <span className="dwf-figure-val">{totalTokens > 0 ? formatTokens(totalTokens) : '—'}</span>
-            <span className="dwf-figure-lbl">{t('figure.tokens')}</span>
-          </div>
-          <div className="dwf-figure">
-            <span className="dwf-figure-val">{agentsCount > 0 ? String(agentsCount) : '—'}</span>
-            <span className="dwf-figure-lbl">{t('figure.subagents')}</span>
-          </div>
-          <div className="dwf-figure">
-            <span className="dwf-figure-val">{stationsCount > 0 ? String(stationsCount) : '—'}</span>
-            <span className="dwf-figure-lbl">{t('figure.phases')}</span>
-          </div>
         </div>
       ) : null}
 

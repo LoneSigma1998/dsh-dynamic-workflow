@@ -12,9 +12,8 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Translate } from './host-types.ts'
-import { SaveFloppyIcon, SparkleIcon } from './AgentFace.tsx'
+import { PlayTriangleIcon, SaveFloppyIcon, SparkleIcon } from './AgentFace.tsx'
 import { apiGet, apiPost } from './run-view.ts'
 
 const NAME_PATTERN = /^[A-Za-z0-9_.-]+$/u
@@ -36,6 +35,16 @@ export function isValidWorkflowFileName(name: string): boolean {
 export function savedPathPreview(scope: 'project' | 'global', name: string): string {
   const file = `${name.length > 0 ? name : '…'}.dwf.ts`
   return scope === 'global' ? `~/.dsh/workflows/${file}` : `.dsh/workflows/${file}`
+}
+
+export function SavedStatusBadge({ savedAs, t }: { savedAs: SavedRunRef | null | undefined; t: Translate }) {
+  if (savedAs === undefined || savedAs === null) return null
+  return (
+    <span className="dwf-saved-chip" title={savedPathPreview(savedAs.scope, savedAs.name)} data-dwf-saved-chip="">
+      <span aria-hidden>✓</span>
+      <span>{t('save.saved')}</span>
+    </span>
+  )
 }
 
 export function SaveWorkflowControls({
@@ -86,9 +95,9 @@ export function SaveWorkflowControls({
   }, [toast])
 
   if (savedAs !== undefined && savedAs !== null) {
+    if (sessionId === undefined) return null
     const handleRunAgain = async () => {
-      if (sessionId === undefined || runningAgain) return
-      // If required arguments without defaults exist, open the Workflows home panel to fill them.
+      if (runningAgain) return
       if (savedAs.hasRequiredArgs === true) {
         onOpenRun?.('')
         return
@@ -109,13 +118,17 @@ export function SaveWorkflowControls({
     }
     return (
       <span className="dwf-save-controls">
-        <span className="dwf-saved-chip" title={`${savedPathPreview(savedAs.scope, savedAs.name)}`}>✓ {t('save.saved')}</span>
-        {sessionId !== undefined ? (
-          <Button size="sm" variant="outline" disabled={runningAgain} onClick={(e) => { e.stopPropagation(); void handleRunAgain() }}>
-            {t('save.runAgain')}
-          </Button>
-        ) : null}
         {toast !== undefined ? <span className="dwf-save-toast">{toast}</span> : null}
+        <button
+          type="button"
+          className="dwf-action-pill"
+          disabled={runningAgain}
+          data-dwf-run-again=""
+          onClick={(e) => { e.stopPropagation(); void handleRunAgain() }}
+        >
+          <PlayTriangleIcon size={12} />
+          <span>{t('save.runAgain')}</span>
+        </button>
       </span>
     )
   }

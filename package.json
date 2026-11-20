@@ -1,6 +1,6 @@
 {
   "name": "@sigmacamellia/dsh-dynamic-workflow",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Typechecked TypeScript multi-agent dynamic workflow plugin for DeepSeek Harness (DSH): parallel subagents, SQLite durable journal (resume / amend / holes / escalations), vertical spine timeline, and live dashboard artifacts. Ported from ZCode (Apache-2.0).",
   "license": "Apache-2.0",
   "type": "module",

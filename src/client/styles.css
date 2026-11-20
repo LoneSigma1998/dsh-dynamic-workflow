@@ -84,12 +84,13 @@
 
 /* ——— chat card (tool card + turn-level run card) ——— */
 .dwf-card {
-  --dwf-surface: var(--dsw-alias-bg-module-platform, var(--dsw-alias-bg-layer-1));
+  /* Solid opaque surface so station captions & lamps mask rails without alpha doubling */
+  --dwf-surface: var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-base));
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   margin: 6px 0;
-  padding: 12px 14px 14px;
+  padding: 10px 14px 12px;
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-md, 12px);
   background: var(--dwf-surface);
@@ -178,8 +179,7 @@
   margin-left: auto;
   flex: none;
 }
-.dwf-card-head-summary,
-.dwf-card-live-tokens {
+.dwf-card-head-summary {
   color: var(--dsw-alias-label-tertiary);
   font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
   font-variant-numeric: tabular-nums;
@@ -210,11 +210,6 @@
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, currentColor);
 }
 
-/*
- * Every item carries its own leading "·"; the box is pulled 14px left and clipped back at its
- * true edge, so the separator of whichever item starts a line (the first, or one that wrapped)
- * falls outside the clip. No line ever begins with a stray dot.
- */
 .dwf-card-meta {
   --dwf-sep: 14px;
   display: flex;
@@ -342,7 +337,7 @@
 }
 .dwf-link:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, currentColor); border-radius: 3px; }
 
-/* ——— horizontal timeline ——— */
+/* ——— horizontal timeline (hidden native scrollbar + ZCode 2px track bar) ——— */
 .dwf-timeline-wrap {
   position: relative;
   min-width: 0;
@@ -351,27 +346,13 @@
   flex: none;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   margin: 0 -4px;
-  padding: 2px 4px 6px;
+  padding: 2px 4px 4px;
   --dwf-fade: 36px;
 }
-.dwf-timeline-scroll:hover {
-  scrollbar-color: var(--dsw-alias-scrollbar-bg-l2, var(--dsw-alias-border-l2)) transparent;
-}
-.dwf-timeline-scroll::-webkit-scrollbar { height: 5px; }
-.dwf-timeline-scroll::-webkit-scrollbar-track { background: transparent; }
-.dwf-timeline-scroll::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 999px;
-}
-.dwf-timeline-scroll:hover::-webkit-scrollbar-thumb {
-  background: var(--dsw-alias-scrollbar-bg-l2, var(--dsw-alias-border-l2));
-}
-.dwf-timeline-scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--dsw-alias-scrollbar-hover-l2, var(--dsw-alias-label-tertiary));
-}
+.dwf-timeline-scroll::-webkit-scrollbar { display: none; }
 .dwf-timeline-scroll[data-fade='end'] {
   -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--dwf-fade)), transparent);
   mask-image: linear-gradient(to right, #000 calc(100% - var(--dwf-fade)), transparent);
@@ -384,6 +365,23 @@
   -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--dwf-fade), #000 calc(100% - var(--dwf-fade)), transparent);
   mask-image: linear-gradient(to right, transparent, #000 var(--dwf-fade), #000 calc(100% - var(--dwf-fade)), transparent);
 }
+.dwf-timeline-bar {
+  position: relative;
+  height: 2px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dsw-alias-border-l2) 55%, transparent);
+  overflow: hidden;
+}
+.dwf-timeline-thumb {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: var(--dsw-alias-label-tertiary);
+  opacity: 0.45;
+  transition: left 0.08s linear;
+}
 .dwf-timeline-more-badge {
   position: absolute;
   right: 2px;
@@ -393,7 +391,7 @@
   align-items: center;
   padding: 2px 4px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--dwf-surface, var(--dsw-alias-bg-base)) 85%, transparent);
+  background: color-mix(in srgb, var(--dwf-surface, var(--dsw-alias-bg-base)) 90%, transparent);
   color: var(--dsw-alias-label-tertiary);
 }
 .dwf-timeline-more-badge[data-done] {
@@ -466,7 +464,6 @@
 .dwf-lamp-failed { border: 0; background: var(--dsw-alias-state-error-primary); }
 .dwf-lamp-hole { border-style: dashed; background: var(--dwf-surface, transparent); }
 .dwf-lamp-typing { border-color: var(--dsw-alias-label-secondary); }
-.dwf-station[data-unreached] .dwf-lamp { opacity: 0.5; }
 @keyframes dwf-pulse {
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--dsw-alias-state-business-primary) 48%, transparent); }
   70% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--dsw-alias-state-business-primary) 0%, transparent); }
@@ -486,7 +483,6 @@
   white-space: nowrap;
   background: var(--dwf-surface, var(--dsw-alias-bg-base));
 }
-.dwf-station[data-unreached] .dwf-station-caption { opacity: 0.52; }
 .dwf-station-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -494,7 +490,10 @@
   color: var(--dsw-alias-label-primary);
 }
 .dwf-station[data-status='static'] .dwf-station-name,
-.dwf-station[data-status='pending'] .dwf-station-name { color: var(--dsw-alias-label-secondary); }
+.dwf-station[data-status='pending'] .dwf-station-name {
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+}
 .dwf-station-meta {
   flex: none;
   font: var(--dsw-font-xxxs-11, 11px/16px sans-serif);
@@ -511,7 +510,7 @@
 }
 @keyframes dwf-blink { 50% { opacity: 0; } }
 
-/* ——— subagent & script pills ——— */
+/* ——— ZCode stadium pills (`WorkflowAgentPill`: rounded-full, h-8, full-saturation face) ——— */
 .dwf-pill {
   --dwf-pill-bg: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1)));
   position: absolute;
@@ -522,27 +521,25 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 9px 0 6px;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: 10px;
+  padding: 0 10px 0 8px;
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-border-l2) 85%, transparent);
+  border-radius: 999px;
   background: var(--dwf-pill-bg);
   color: var(--dsw-alias-label-primary);
   font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
   text-align: left;
-  transition: background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, opacity 0.14s ease;
+  transition: background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
 }
 .dwf-pill[data-status='running'] {
   border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 58%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--dsw-alias-state-business-primary) 22%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--dsw-alias-state-business-primary) 20%, transparent);
 }
 .dwf-pill[data-status='failed'] {
   border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 58%, transparent);
 }
-.dwf-pill[data-status='pending'] { color: var(--dsw-alias-label-secondary); }
-.dwf-pill[data-unreached],
-.dwf-spine-pill[data-unreached],
-.dwf-spine-section[data-unreached] .dwf-spine-head {
-  opacity: 0.45;
+.dwf-pill[data-status='pending'],
+.dwf-pill[data-status='static'] {
+  color: var(--dsw-alias-label-secondary);
 }
 .dwf-pill-button { cursor: pointer; }
 @media (hover: hover) {
@@ -561,6 +558,12 @@
   white-space: nowrap;
   font-weight: 500;
 }
+.dwf-pill[data-status='pending'] .dwf-pill-name,
+.dwf-pill[data-status='static'] .dwf-pill-name,
+.dwf-spine-pill[data-status='pending'] .dwf-pill-name,
+.dwf-spine-pill[data-status='static'] .dwf-pill-name {
+  font-weight: 400;
+}
 .dwf-pill-asking {
   flex: none;
   width: 15px;
@@ -574,47 +577,45 @@
 }
 .dwf-pill-failed { flex: none; color: var(--dsw-alias-state-error-primary); font-weight: 500; }
 .dwf-pill-more { border-style: dashed; color: var(--dsw-alias-label-secondary); }
-.dwf-pill-open-arrow {
+.dwf-pill-tail {
   flex: none;
-  font-size: 11px;
+  width: 14px;
+  height: 14px;
+  display: inline-grid;
+  place-items: center;
+}
+.dwf-pill-tail:empty { display: none; }
+.dwf-pill-tail > * { grid-area: 1 / 1; }
+.dwf-pill-open-arrow {
+  font-size: 11.5px;
   line-height: 1;
   color: var(--dsw-alias-label-tertiary);
   opacity: 0;
   transition: opacity 0.14s ease;
 }
 @media (hover: hover) {
-  .dwf-pill-button:hover .dwf-pill-open-arrow { opacity: 0.85; }
+  .dwf-pill-button:hover .dwf-pill-open-arrow { opacity: 0.9; }
+  .dwf-pill-button:hover .dwf-script-check { opacity: 0; }
 }
-.dwf-script-glyph {
+.dwf-terminal-icon {
   flex: none;
-  width: 20px;
-  height: 20px;
-  border-radius: 6px;
-  display: inline-grid;
-  place-items: center;
   color: var(--dsw-alias-label-secondary);
-  background: var(--dsw-alias-bg-mask-1, var(--dsw-alias-fill-tsp-secondary));
-  font-family: var(--ds-font-family-code, ui-monospace, monospace);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: -0.05em;
 }
-.dwf-script-glyph-sm {
-  width: 18px;
-  height: 18px;
-  border-radius: 5.5px;
-  font-size: 9px;
+.dwf-terminal-icon-sm {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
 }
 .dwf-script-check {
   flex: none;
   color: var(--dsw-alias-label-tertiary);
   opacity: 0.8;
+  transition: opacity 0.14s ease;
 }
 .dwf-deck { display: inline-flex; align-items: center; padding-left: 2px; margin-right: 4px; }
 .dwf-deck-face { margin-right: -4px; }
 .dwf-deck-face:last-child { margin-right: 0; }
 
-/* ——— chat card artifact pills & 4-column receipt figures ——— */
+/* ——— chat card artifact pills ——— */
 .dwf-artifact-strip {
   display: flex;
   flex-wrap: wrap;
@@ -638,10 +639,6 @@
   cursor: pointer;
   transition: background-color 0.14s ease, border-color 0.14s ease;
 }
-.dwf-artifact-pill-subtle {
-  color: var(--dsw-alias-label-secondary);
-  background: transparent;
-}
 @media (hover: hover) {
   .dwf-artifact-pill:hover {
     background: var(--dsw-alias-card-fill-hover, var(--dsw-alias-interactive-bg-hover));
@@ -662,34 +659,6 @@
 }
 .dwf-artifact-pill-label {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.dwf-receipt-figures {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  padding-top: 8px;
-  border-top: 0.5px solid color-mix(in srgb, var(--dsw-alias-border-l2) 65%, transparent);
-}
-.dwf-figure {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-.dwf-figure-val {
-  font: var(--dsw-font-xs-strong-13, 600 13px/18px sans-serif);
-  font-variant-numeric: tabular-nums;
-  color: var(--dsw-alias-label-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.dwf-figure-lbl {
-  font: var(--dsw-font-xxxs-11, 11px/15px sans-serif);
-  color: var(--dsw-alias-label-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -743,7 +712,7 @@
 .dwf-notice-dot[data-tone='warning'] { background: var(--dsw-alias-state-warn-primary, var(--dsw-alias-state-business-primary)); }
 .dwf-notice-text { white-space: pre-wrap; max-height: 280px; }
 
-/* ——— run pane (right sidebar) ——— */
+/* ——— run pane (right sidebar: ZCode full-bleed section rhythm) ——— */
 .dwf-pane {
   --dwf-surface: var(--dsw-alias-bg-base);
   display: flex;
@@ -755,6 +724,12 @@
   overflow: auto;
   height: 100%;
   box-sizing: border-box;
+  background: var(--dsw-alias-bg-base);
+}
+.dwf-pane-overview {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
 }
 .dwf-pane-head {
   display: flex;
@@ -765,17 +740,41 @@
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
 }
 .dwf-pane-header-block {
+  flex: none;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding-bottom: 12px;
+  gap: 6px;
+  padding: 12px 14px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
 }
 .dwf-pane-top-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
+}
+.dwf-back-subtle {
+  flex: none;
+  width: 20px;
+  height: 24px;
+  margin-left: -4px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+@media (hover: hover) {
+  .dwf-back-subtle:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+    color: var(--dsw-alias-label-primary);
+  }
 }
 .dwf-action-pill {
   flex: none;
@@ -810,7 +809,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
+  gap: 8px;
   font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
   color: var(--dsw-alias-label-secondary);
 }
@@ -826,18 +825,12 @@
 .dwf-pane-status-word[data-status='errored'] {
   color: var(--dsw-alias-state-error-primary);
 }
-.dwf-pane-model-chip {
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--dsw-alias-bg-mask-1, var(--dsw-alias-fill-tsp-secondary));
-  color: var(--dsw-alias-label-tertiary);
-  font: var(--dsw-font-xxxs-11, 11px/16px sans-serif);
-}
 .dwf-pane-summary {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 5px;
+  margin-top: 2px;
   color: var(--dsw-alias-label-tertiary);
   font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
   font-variant-numeric: tabular-nums;
@@ -855,29 +848,42 @@
 .dwf-pane-dot { opacity: 0.6; }
 
 .dwf-pane-result-bar {
+  flex: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-bottom: 12px;
+  gap: 3px;
+  padding: 10px 14px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
 }
-.dwf-pane-result-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+.dwf-pane-error-bar {
+  border-bottom-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 40%, var(--dsw-alias-border-l2));
 }
 .dwf-pane-result-label {
-  font: var(--dsw-font-xxxs-11, 600 11.5px/16px sans-serif);
+  font: var(--dsw-font-xxxs-11, 500 11.5px/16px sans-serif);
   color: var(--dsw-alias-label-tertiary);
+}
+.dwf-pane-error-bar .dwf-pane-result-label {
+  color: var(--dsw-alias-state-error-primary);
 }
 .dwf-pane-result-hint {
   margin: 0;
   color: var(--dsw-alias-label-secondary);
   font: var(--dsw-font-xs-13, 13px/20px sans-serif);
 }
-.dwf-raw-toggle {
-  font: var(--dsw-font-xxxs-11, 11.5px/16px sans-serif);
+.dwf-pane-error-msg {
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xs-13, 13px/20px sans-serif);
+}
+.dwf-pane-spine-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 10px 12px;
 }
 
 .dwf-icon-btn {
@@ -905,6 +911,7 @@
 .dwf-icon-btn:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, currentColor); }
 .dwf-pane-title {
   margin: 0;
+  flex: 1 1 auto;
   font: var(--dsw-font-s-strong-14, 600 14px/22px sans-serif);
   letter-spacing: -0.01em;
   overflow: hidden;
@@ -942,9 +949,6 @@
 }
 .dwf-plain-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
 .dwf-plain-list li { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.dwf-roll { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
-.dwf-roll-phase { display: flex; align-items: center; gap: 6px; font: var(--dsw-font-xxs-strong-12, 600 12px/18px sans-serif); color: var(--dsw-alias-label-secondary); }
-.dwf-roll-row { padding-left: 16px; font: var(--dsw-font-xxs-12, 12px/18px sans-serif); }
 
 /* ——— Save & Distill Workflow popover (`SavePopover.tsx`) ——— */
 .dwf-save-anchor {
@@ -957,22 +961,24 @@
   align-items: center;
   gap: 6px;
 }
+/* Subtle Row-2 `✓ 已保存` chip next to `● 已完成`, matching ZCode screenshot */
 .dwf-saved-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 25px;
-  padding: 0 8px;
+  height: 20px;
+  padding: 0 7px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 14%, transparent);
-  color: var(--dsw-alias-state-success-primary);
-  font: var(--dsw-font-xxxs-strong-11, 600 11px/16px sans-serif);
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1));
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxxs-11, 500 11px/16px sans-serif);
   white-space: nowrap;
 }
 .dwf-save-toast {
   font: var(--dsw-font-xxxs-11, 11px/16px sans-serif);
   color: var(--dsw-alias-state-success-primary);
-  max-width: 200px;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1218,11 +1224,9 @@
   }
 }
 
-/* long results stay compact on the run card */
 .dwf-outcome pre.dwf-clamped { max-height: 9.5em; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent); mask-image: linear-gradient(to bottom, #000 70%, transparent); }
 .dwf-outcome pre { max-height: 480px; }
 .dwf-more { align-self: flex-start; font: var(--dsw-font-xxs-12, 12px/18px sans-serif); }
-.dwf-pane-result { white-space: pre-wrap; word-break: break-word; max-height: 360px; margin-top: 6px; }
 .dwf-retune { display: inline-flex; align-items: center; gap: 4px; }
 .dwf-step {
   width: 20px; height: 20px; padding: 0;
@@ -1277,6 +1281,7 @@
 .dwf-setting-was { padding: 0; border: 0; background: none; color: var(--dsw-alias-label-tertiary); font: inherit; cursor: pointer; }
 @media (hover: hover) { .dwf-setting-was:hover { color: var(--dsw-alias-label-secondary); } }
 .dwf-configure {
+  margin: 10px 12px 0;
   display: flex; flex-direction: column; gap: 8px;
   padding: 10px 12px;
   border: 0.5px solid var(--dsw-alias-border-l2);
@@ -1285,112 +1290,117 @@
 }
 .dwf-configure-hint { margin: 0; font: var(--dsw-font-xxs-12, 12px/18px sans-serif); }
 
-/* ——— artifacts (pane) ——— */
-.dwf-artifact {
+/* ——— Compact Artifacts Footer & Full-Pane Reader (`RunExtras.tsx`) ——— */
+.dwf-artifacts-footer {
+  flex: none;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 11px 13px;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: var(--dsw-radius-md, 10px);
-  background: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1));
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-base);
 }
-.dwf-artifact[data-focused] {
-  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, var(--dsw-alias-border-l2));
-}
-.dwf-artifact + .dwf-artifact { margin-top: 2px; }
-.dwf-artifact-head {
+.dwf-artifacts-sec-head {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
-  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
-}
-.dwf-artifact-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  padding: 0;
+  width: 100%;
+  height: 36px;
+  padding: 0 14px;
   border: 0;
-  background: none;
+  background: transparent;
   color: var(--dsw-alias-label-primary);
-  cursor: pointer;
   text-align: left;
+  cursor: pointer;
+  transition: background-color 0.14s ease;
 }
-.dwf-artifact-head-icon {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  color: var(--dsw-alias-label-secondary);
+@media (hover: hover) {
+  .dwf-artifacts-sec-head:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
-.dwf-artifact-title {
+.dwf-artifacts-sec-title {
+  font: var(--dsw-font-xs-strong-13, 600 13px/18px sans-serif);
+}
+.dwf-artifacts-sec-count {
+  font: 11.5px/16px var(--ds-font-family-code, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-tertiary);
+}
+.dwf-artifacts-sec-sub {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font: var(--dsw-font-xs-strong-13, 600 13px/18px sans-serif);
-  color: var(--dsw-alias-label-primary);
-}
-.dwf-artifact-badge {
-  flex: none;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--dsw-alias-bg-mask-2, var(--dsw-alias-fill-tsp-secondary));
   color: var(--dsw-alias-label-secondary);
-  font: var(--dsw-font-xxxs-11, 500 10.5px/16px sans-serif);
-  letter-spacing: 0.01em;
+  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
 }
-.dwf-artifact-badge-primary {
-  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 16%, transparent);
-  color: var(--dsw-alias-state-business-primary);
+.dwf-artifacts-sec-chevron { margin-left: auto; }
+.dwf-artifacts-index {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 184px;
+  overflow-y: auto;
+  padding: 0 12px 12px;
+}
+.dwf-artifact-index-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 9px;
+  background: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1));
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxs-12, 500 12.5px/18px sans-serif);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+@media (hover: hover) {
+  .dwf-artifact-index-row:hover {
+    background: var(--dsw-alias-card-fill-hover, var(--dsw-alias-interactive-bg-hover));
+    border-color: var(--dsw-alias-border-l3, var(--dsw-alias-border-l2));
+  }
+}
+.dwf-artifact-index-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dwf-artifact-index-meta {
+  flex: none;
+  font: var(--dsw-font-xxxs-11, 11px/16px sans-serif);
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-tertiary);
+}
+.dwf-artifact-index-arrow {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-tertiary);
 }
 .dwf-artifact-meta {
   font: var(--dsw-font-xxxs-11, 11px/16px sans-serif);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.dwf-artifact-actions {
-  margin-left: auto;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
+.dwf-reader-body {
+  flex: 1 1 auto;
+  min-height: 0;
 }
-.dwf-artifact-action-link {
-  font-size: 12px;
-  white-space: nowrap;
-}
-/* Markdown renders naturally in the pane without nested scrollbars slicing lines in half */
 .dwf-artifact-markdown {
-  padding: 2px 2px 0;
+  padding: 2px 2px 12px;
   overflow-x: auto;
 }
-.dwf-artifact-markdown-clamped {
-  position: relative;
-  max-height: 500px;
-  overflow: hidden;
-}
-.dwf-artifact-fade {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 74px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding-bottom: 4px;
-  background: linear-gradient(to bottom, transparent, var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1)) 76%);
-}
-.dwf-artifact-text {
-  max-height: 420px;
-  overflow: auto;
+.dwf-reader-code {
+  max-height: none;
 }
 .dwf-artifact-image { max-width: 100%; border-radius: 6px; }
 
-/* ——— script steps ——— */
+/* ——— script logbook steps ——— */
 .dwf-steps {
   list-style: none;
   margin: 0;
@@ -1403,7 +1413,7 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 5px 10px;
+  padding: 6px 10px;
   font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
 }
 .dwf-step-row + .dwf-step-row {
@@ -1433,11 +1443,6 @@
   font: var(--dsw-font-xxxs-11, 11px/16px sans-serif);
   color: var(--dsw-alias-label-tertiary);
   font-variant-numeric: tabular-nums;
-}
-.dwf-card-footer-action {
-  padding: 6px 10px;
-  border-top: 0.5px solid var(--dsw-alias-border-l2);
-  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
 }
 
 /* ——— routing segmented control + saved workflows ——— */
@@ -1488,108 +1493,7 @@
 .dwf-input { width: 220px; justify-content: flex-start; }
 .dwf-saved-runs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 
-/* ——— per-subagent changes ——— */
-.dwf-changes-agent + .dwf-changes-agent { margin-top: 2px; }
-.dwf-changes-head {
-  --dwf-pill-bg: var(--dsw-alias-bg-mask-1);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 7px 10px;
-  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
-  background: var(--dwf-pill-bg);
-}
-.dwf-changes-actor {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--dsw-alias-label-primary);
-  font: var(--dsw-font-xxs-strong-12, 600 12px/18px sans-serif);
-  cursor: pointer;
-  min-width: 0;
-}
-@media (hover: hover) {
-  .dwf-changes-actor:hover { color: var(--dsw-alias-link, var(--dsw-alias-state-business-primary)); }
-}
-.dwf-changes-file-count {
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--dsw-alias-bg-mask-2, var(--dsw-alias-fill-tsp-secondary));
-  color: var(--dsw-alias-label-tertiary);
-  font: var(--dsw-font-xxxs-11, 11px/16px sans-serif);
-  font-variant-numeric: tabular-nums;
-}
-.dwf-change-list {
-  list-style: none;
-  margin: 0;
-  padding: 3px 0;
-  display: flex;
-  flex-direction: column;
-}
-.dwf-change-file {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.dwf-change-file + .dwf-change-file {
-  border-top: 0.5px solid color-mix(in srgb, var(--dsw-alias-border-l2) 55%, transparent);
-}
-.dwf-change-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  min-width: 0;
-  padding: 6px 10px;
-  border: 0;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
-  transition: background-color 0.12s ease;
-}
-@media (hover: hover) {
-  .dwf-change-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
-}
-.dwf-change-path { flex: 1; }
-.dwf-change-badge {
-  flex: none;
-  padding: 1px 6px;
-  border-radius: 5px;
-  background: var(--dsw-alias-bg-mask-2, var(--dsw-alias-fill-tsp-secondary));
-  color: var(--dsw-alias-label-secondary);
-  font: var(--dsw-font-xxxs-11, 500 10.5px/15px sans-serif);
-}
-.dwf-change-badge-new {
-  background: color-mix(in srgb, var(--dsw-alias-code-diff-added, #3fb950) 16%, transparent);
-  color: var(--dsw-alias-code-diff-added, #3fb950);
-}
-.dwf-change-badge-del {
-  background: color-mix(in srgb, var(--dsw-alias-code-diff-deleted, #f85149) 16%, transparent);
-  color: var(--dsw-alias-code-diff-deleted, #f85149);
-}
-.dwf-change-stats {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 4px;
-  font-family: var(--ds-font-family-code, ui-monospace, monospace);
-  font-size: 11.5px;
-  font-variant-numeric: tabular-nums;
-}
-.dwf-diff-add { color: var(--dsw-alias-code-diff-added, #3fb950); }
-.dwf-diff-del { color: var(--dsw-alias-code-diff-deleted, #f85149); }
-.dwf-diff { max-height: 420px; margin: 0 8px 8px; overflow: auto; font-size: 12px; line-height: 18px; }
-.dwf-diff-hunk { color: var(--dsw-alias-label-tertiary); }
-.dwf-diff-file { color: var(--dsw-alias-label-secondary); }
-.dwf-meta-link { font: inherit; }
-
-/* ——— collapsible disclosure bar (Show script) ——— */
+/* ——— collapsible disclosure bar (Show script in ScriptLogbookView) ——— */
 .dwf-disclosure-btn {
   display: flex;
   align-items: center;
@@ -1639,7 +1543,7 @@
 .dwf-confirm-save code { font-family: var(--ds-font-family-code, ui-monospace, monospace); word-break: break-all; }
 .dwf-confirm-holes { margin: 0; font: var(--dsw-font-xxs-12, 12px/18px sans-serif); }
 
-/* ——— vertical commit-graph spine (right sidebar) ——— */
+/* ——— vertical commit-graph spine (right sidebar, ZCode single-line stadium pills) ——— */
 .dwf-spine {
   display: flex;
   flex-direction: column;
@@ -1666,8 +1570,8 @@
   width: 1.25px;
   background: var(--dsw-alias-border-l2);
 }
-.dwf-spine-rail-above { top: 0; height: 15px; }
-.dwf-spine-rail-below { top: 15px; bottom: 0; }
+.dwf-spine-rail-above { top: 0; height: 17px; }
+.dwf-spine-rail-below { top: 17px; bottom: 0; }
 .dwf-spine-rail-full { top: 0; bottom: 0; }
 .dwf-spine-ink-faint { background: var(--dsw-alias-border-l2); }
 .dwf-spine-ink-strong { background: var(--dsw-alias-label-tertiary); }
@@ -1686,28 +1590,26 @@
   );
 }
 .dwf-spine-lamp {
-  top: 10px;
+  top: 12px;
 }
-.dwf-spine-section[data-unreached] .dwf-spine-lamp { opacity: 0.45; }
 .dwf-spine-body {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding-bottom: 4px;
 }
 .dwf-spine-head {
   --dwf-pill-bg: var(--dsw-alias-bg-base);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  min-height: 30px;
-  padding: 3px 6px;
+  min-height: 34px;
+  padding: 4px 6px;
   border: 0;
   border-radius: var(--dsw-radius-sm, 8px);
   background: none;
   color: var(--dsw-alias-label-primary);
-  font: var(--dsw-font-xs-strong-13, 600 12.5px/18px sans-serif);
+  font: var(--dsw-font-xs-strong-13, 500 13px/18px sans-serif);
   text-align: left;
   cursor: pointer;
 }
@@ -1733,52 +1635,51 @@
   white-space: nowrap;
 }
 .dwf-spine-section[data-status='pending'] .dwf-spine-name,
-.dwf-spine-section[data-status='static'] .dwf-spine-name { color: var(--dsw-alias-label-secondary); }
+.dwf-spine-section[data-status='static'] .dwf-spine-name {
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+}
 .dwf-spine-right {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   flex: none;
 }
 .dwf-spine-cluster {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 5px;
 }
-.dwf-cluster-face {
-  margin-left: -2px;
-}
-.dwf-cluster-face:first-child { margin-left: 0; }
 .dwf-spine-content {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 4px 0 6px 4px;
+  gap: 6px;
+  padding: 2px 2px 10px 4px;
 }
 .dwf-spine-pill-wrap {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
 }
 .dwf-spine-pill {
   --dwf-pill-bg: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1));
   width: 100%;
-  min-height: 36px;
+  height: 32px;
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 5px 10px 5px 7px;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: 11px;
+  gap: 8px;
+  padding: 0 10px 0 8px;
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-border-l2) 85%, transparent);
+  border-radius: 999px;
   background: var(--dwf-pill-bg);
   color: var(--dsw-alias-label-primary);
-  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
+  font: var(--dsw-font-xxs-12, 12.5px/18px sans-serif);
   text-align: left;
   min-width: 0;
-  transition: background-color 0.14s ease, border-color 0.14s ease, opacity 0.14s ease;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
 }
 .dwf-spine-pill[data-status='running'] {
   border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, transparent);
@@ -1786,29 +1687,21 @@
 .dwf-spine-pill[data-status='failed'] {
   border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 55%, transparent);
 }
-.dwf-spine-pill[data-status='pending'] { color: var(--dsw-alias-label-secondary); }
-.dwf-spine-pill-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+.dwf-spine-pill[data-status='pending'],
+.dwf-spine-pill[data-status='static'] {
+  color: var(--dsw-alias-label-secondary);
 }
-.dwf-spine-pill-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  font: var(--dsw-font-xxxs-11, 11px/15px sans-serif);
+.dwf-spine-pill-trailer {
+  flex: none;
+  font: 11px/16px var(--ds-font-family-code, ui-monospace, monospace);
   font-variant-numeric: tabular-nums;
   color: var(--dsw-alias-label-tertiary);
 }
-.dwf-spine-pill-meta:empty { display: none; }
 .dwf-spine-question {
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  margin-left: 16px;
+  margin-left: 22px;
   padding: 6px 8px;
   border-radius: var(--dsw-radius-sm, 8px);
   background: var(--dsw-alias-bg-mask-1);
@@ -1904,7 +1797,7 @@
 }
 
 .dwf-table-wrap {
-  max-height: 320px;
+  max-height: 360px;
   overflow: auto;
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-sm, 8px);

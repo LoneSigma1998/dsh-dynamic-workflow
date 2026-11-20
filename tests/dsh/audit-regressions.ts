@@ -53,7 +53,7 @@ function send(agent: Agent, content: string): void {
 }
 
 function childName(request: RequestView): string | undefined {
-  return /You are the subagent "([^"]+)"/u.exec(request.system)?.[1]
+  return /You are a subagent inside a dynamic workflow run, named "([^"]+)"/u.exec(request.system)?.[1]
 }
 
 async function waitFor<T>(label: string, probe: () => T | undefined, timeoutMs = 15_000): Promise<T> {

@@ -108,16 +108,30 @@ function topLevelSchemaProperties(schema: unknown): Set<string> {
   return new Set(Object.keys(properties as Record<string, unknown>))
 }
 
-/** System-prompt preamble every workflow subagent reads (DSH counterpart of ZCode's engine persona). */
-export function subagentPreamble(input: { runName?: string; actorName?: string }): string {
-  const who = input.actorName === undefined ? 'a subagent' : `the subagent "${input.actorName}"`
-  const run = input.runName === undefined ? 'a dynamic workflow' : `the dynamic workflow "${input.runName}"`
+/**
+ * System-prompt identity and contract every workflow subagent reads.
+ * Ported verbatim from ZCode's `core/src/context/sections/workflow-actor.ts` (Apache-2.0):
+ * opening (who you are & who reads your output) → author's persona → `# Working inside a workflow`.
+ */
+export function subagentPreamble(input: { runName?: string; actorName?: string; persona?: string }): string {
+  const name = input.actorName?.trim()
+  const named = name ? `, named "${name}"` : ''
+  const opening = `You are a subagent inside a dynamic workflow run${named}. A script created you and hands you work one ask at a time; the script — not a person — consumes what you return. There is no user in this conversation to talk to.`
+  const persona = input.persona?.trim()
+  const contract = [
+    '# Working inside a workflow',
+    '- You have the regular working tools — reading, searching, editing, running commands — plus `submit_result` and `escalate`. There is no tool that asks a person anything.',
+    '- Each ask states what to do. When the ask carries a result schema, finish by calling `submit_result` with a conforming value; otherwise your final message is the result.',
+    '- Ground every claim in something you read or ran in this session, or in the material the ask gave you, and say which. Cite code as `path:line`. A check counts as passed only if you executed it here; if you could not run it, report it as not run. Run the check an ask names rather than a faster substitute, and say exactly which command you ran.',
+    '- Report outcomes faithfully. If part of the task is impossible, out of scope, or contradicted by what you found, say so in the result instead of filling a field with a plausible guess. Never fake a passing result to satisfy an instruction.',
+    '- When you are blocked by something outside your reach — a gate that cannot pass, instructions that contradict each other, a fact only the run\'s owner knows — call `escalate`. Questions written in prose reach nobody.',
+    '- Do not write report or summary files on your own initiative; findings go in the result. When the ask names an output path, write exactly there and return that path in the result — the script publishes it to the user.',
+  ].join('\n')
   return [
-    `You are ${who} in ${run}: a script written by the main agent hands you tasks one at a time and reads your answers.`,
-    'Each user message in this conversation is one task. Work it to completion with your tools, then answer.',
-    'When a task has a typed result, you MUST finish by calling `submit_result` with a value that matches the schema; plain text does not count as the result of a typed task.',
-    'Your results are read by the user, in their language. Be concrete: cite files with path and line, commands with their real output.',
-    'You cannot ask the user anything directly. If something outside your reach blocks you, call `escalate` with one focused question.',
+    opening,
+    ...persona ? ['', persona] : [],
+    '',
+    contract,
   ].join('\n')
 }
 

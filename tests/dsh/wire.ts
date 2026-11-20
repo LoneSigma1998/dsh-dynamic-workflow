@@ -78,7 +78,7 @@ function plug(context: Context, plugin: unknown, config: unknown = {}): Promise<
 }
 
 function childName(request: AnthropicRequestView): string | undefined {
-  return /You are the subagent "([^"]+)"/u.exec(request.system)?.[1]
+  return /You are a subagent inside a dynamic workflow run, named "([^"]+)"/u.exec(request.system)?.[1]
 }
 
 function send(agent: Agent, value: string): void {

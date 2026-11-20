@@ -39,7 +39,7 @@ async function main(): Promise<void> {
   let searches = 0
   const refusals: string[] = []
   const model = new ScriptedModel(async (request) => {
-    const child = /You are the subagent "([^"]+)"/u.exec(request.system)?.[1]
+    const child = /You are a subagent inside a dynamic workflow run, named "([^"]+)"/u.exec(request.system)?.[1]
     const last = request.lastToolResult
     if (child === undefined) {
       if (request.lastUser === 'RUN' && last === undefined) return toolCall('create_workflow', { name: 'research', script: SCRIPT })

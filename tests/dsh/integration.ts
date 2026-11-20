@@ -145,7 +145,7 @@ async function waitFor<T>(what: string, probe: () => T | undefined | false, time
 }
 
 function childName(request: RequestView): string | undefined {
-  return /You are the subagent "([^"]+)"/.exec(request.system)?.[1]
+  return /You are a subagent inside a dynamic workflow run, named "([^"]+)"/.exec(request.system)?.[1]
 }
 
 async function main(): Promise<void> {

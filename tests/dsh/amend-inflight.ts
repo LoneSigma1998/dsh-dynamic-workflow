@@ -65,7 +65,7 @@ async function main(): Promise<void> {
   let runId: string | undefined
 
   const model = new ScriptedModel(async (request) => {
-    const child = /You are the subagent "([^"]+)"/u.exec(request.system)?.[1]
+    const child = /You are a subagent inside a dynamic workflow run, named "([^"]+)"/u.exec(request.system)?.[1]
     const last = request.lastToolResult
     if (child === undefined) {
       if (request.lastUser.includes('<task-notification>') && last === undefined) return text('noted')

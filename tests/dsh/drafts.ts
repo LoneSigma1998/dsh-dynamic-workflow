@@ -48,7 +48,7 @@ async function main(): Promise<void> {
 
   const model = new ScriptedModel(async (request) => {
     const last = request.lastToolResult
-    const child = /You are the subagent "([^"]+)"/u.exec(request.system)?.[1]
+    const child = /You are a subagent inside a dynamic workflow run, named "([^"]+)"/u.exec(request.system)?.[1]
     if (child === 'Fixer') {
       // read → edit (ok) → write NOTES (ok) → edit that fails → write outside the workspace → done
       fixerStep += 1

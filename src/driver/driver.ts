@@ -498,10 +498,11 @@ class DshWorkflowDriver implements WorkflowDriver {
       name: 'dynamic-workflow:subagent',
       order: order('DEPLOYMENT_PERSONA_PREFIX', 50) + 1,
       interpolate: false,
-      text: [
-        subagentPreamble({ ...this.deps.runName === undefined ? {} : { runName: this.deps.runName }, ...input.actorName === undefined ? {} : { actorName: input.actorName } }),
-        ...persona.system === undefined || persona.system.length === 0 ? [] : ['', '## Your role', persona.system],
-      ].join('\n'),
+      text: subagentPreamble({
+        ...this.deps.runName === undefined ? {} : { runName: this.deps.runName },
+        ...input.actorName === undefined ? {} : { actorName: input.actorName },
+        ...persona.system === undefined || persona.system.length === 0 ? {} : { persona: persona.system },
+      }),
     })
 
     const tools = childCtx.tools as unknown as {

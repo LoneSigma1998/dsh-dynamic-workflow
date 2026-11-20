@@ -774,9 +774,8 @@ reported item. Do other work, unless the user asked you to wait.
 
 When you genuinely need to look at a run:
 
-- `get_workflow_run` blocks until a run *this session started* finishes: the waiting tool.
-- `get_workflow_run` is an instant snapshot; use it when you must not block, or for a run
-  another session owns, which `get_workflow_run` cannot see.
+- `get_workflow_run` is an instant snapshot (never blocks, and sees runs started by this or
+  another session). Do not call it in a loop to wait — completion arrives through notifications.
 - `list_workflow_runs` enumerates the project's runs, including other sessions'.
 
 Read the terminal state precisely. A run ends in exactly one of three states:

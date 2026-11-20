@@ -431,6 +431,100 @@ async function round4(): Promise<void> {
     console.log('✓ routes: POST fails closed without owner principal, guards NaN retune, serves preset artifact data')
   }
 
+  // Save & Distill Workflow routes + fromRunId provenance
+  {
+    const ws = mkdtempSync(join(tmpdir(), 'dwf-save-route-'))
+    const followups: unknown[] = []
+    const fakeParent = {
+      status: 'idle',
+      session: { id: 'sess-owner', header: { cwd: ws } },
+      followup: (msg: unknown) => { followups.push(msg) },
+    }
+    type Handler = (req: unknown, res: unknown, peer?: unknown) => Promise<void>
+    let handler: Handler | undefined
+    const fakeCtx = {
+      agents: new Map([['sess-owner', fakeParent]]),
+      inject: (_names: string[], cb: (scope: unknown) => void) => cb(fakeCtx),
+      effect: (fn: () => void) => fn(),
+      get: (name: string) => (name === 'webServer'
+        ? { register: (route: { handler: Handler }) => { handler = route.handler; return () => undefined } }
+        : undefined),
+    }
+    const runScript = 'phase("Run"); return await agent("worker").ask("hello");'
+    const fakeService = {
+      journal: {
+        getRun: (id: string) => (id === 'r-save-1' ? { runId: id, name: '迷你正则引擎', parentSessionId: 'sess-owner', cwd: ws, scriptText: runScript } : undefined),
+        listRunLifeSpans: () => [{ startedAt: 1_000, lastActivityAt: 65_000 }],
+      },
+      liveRun: () => undefined,
+      snapshot: () => ({ name: '迷你正则引擎', status: 'completed', spentTokens: 123_456, logTail: [], artifacts: [] }),
+    }
+    registerWorkflowRoutes(fakeCtx as never, {
+      service: fakeService as never,
+      artifacts: { read: async () => undefined } as never,
+    })
+    const owner = { principal: { kind: 'owner' } }
+    const call = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: Record<string, unknown> }> => {
+      const payload = body === undefined ? [] : [Buffer.from(JSON.stringify(body), 'utf8')]
+      const req = {
+        method,
+        url: path,
+        headers: { 'x-dynamic-workflow-request': '1', host: 'localhost' },
+        [Symbol.asyncIterator]: async function * () { for (const chunk of payload) yield chunk },
+      }
+      let status = 200
+      let raw = ''
+      const res = {
+        writeHead: (code: number) => { status = code },
+        end: (data?: string) => { if (data !== undefined) raw += data },
+      }
+      await handler!(req, res, owner)
+      return { status, body: (raw === '' ? {} : JSON.parse(raw)) as Record<string, unknown> }
+    }
+
+    const beforeSave = await call('GET', '/dynamic-workflow/api/runs/r-save-1')
+    assert.equal(beforeSave.status, 200)
+    assert.equal(beforeSave.body.durationMs, 64_000)
+    assert.equal(beforeSave.body.canSave, true)
+    assert.equal(beforeSave.body.savedAs, null)
+
+    const badName = await call('POST', '/dynamic-workflow/api/runs/r-save-1/save', { name: '../escape', scope: 'project' })
+    assert.equal(badName.status, 400)
+    assert.equal(badName.body.reason, 'invalid_name')
+
+    const firstSave = await call('POST', '/dynamic-workflow/api/runs/r-save-1/save', { name: 'regex-engine', scope: 'project', description: 'Regex verification' })
+    assert.equal(firstSave.status, 200)
+    assert.equal(firstSave.body.ok, true)
+
+    const probeTaken = await call('GET', '/dynamic-workflow/api/runs/r-save-1/save-probe?name=regex-engine&scope=project')
+    assert.equal(probeTaken.body.taken, true)
+    const probeShadow = await call('GET', '/dynamic-workflow/api/runs/r-save-1/save-probe?name=regex-engine&scope=global')
+    assert.equal(probeShadow.body.taken, false)
+    assert.equal(probeShadow.body.shadowing, true)
+
+    const dupGuard = await call('POST', '/dynamic-workflow/api/runs/r-save-1/save', { name: 'regex-engine', scope: 'project' })
+    assert.equal(dupGuard.body.ok, false)
+    assert.equal(dupGuard.body.reason, 'target_exists')
+
+    const overwriteOk = await call('POST', '/dynamic-workflow/api/runs/r-save-1/save', { name: 'regex-engine', scope: 'project', overwrite: true })
+    assert.equal(overwriteOk.body.ok, true)
+
+    const afterSave = await call('GET', '/dynamic-workflow/api/runs/r-save-1')
+    assert.deepEqual(afterSave.body.savedAs, { name: 'regex-engine', scope: 'project', hasRequiredArgs: false })
+
+    const distill = await call('POST', '/dynamic-workflow/api/runs/r-save-1/distill', { name: 'regex-reusable', scope: 'project', description: 'Reusable regex builder', locale: 'zh' })
+    assert.equal(distill.status, 200)
+    assert.equal(distill.body.ok, true)
+    assert.equal(followups.length, 1)
+    const injectedText = JSON.stringify(followups[0])
+    assert.match(injectedText, /\/dynamic-workflows/u)
+    assert.match(injectedText, /from_run_id: \\"r-save-1\\"/u)
+    assert.match(injectedText, /regex-reusable/u)
+
+    rmSync(ws, { recursive: true, force: true })
+    console.log('✓ save & distill routes: save-probe collision/shadowing, target_exists guard, fromRunId provenance, and 5-point distillation followup verified')
+  }
+
   // P2: Dashboard preset artifact projections (chart / table / metrics / board)
   {
     const chartSpec = parsePresetSpec('chart', { type: 'line', x: { field: 'round' }, y: [{ field: 'ms', unit: 'ms' }], baseline: { field: 'target' } })

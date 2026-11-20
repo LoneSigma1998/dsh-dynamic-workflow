@@ -88,13 +88,17 @@ export function apply(ctx: ClientContext): void {
     const workspace = ctx.get('uiWorkspace') as ClientContext['uiWorkspace'] | undefined
     workspace?.openSession({ parentSessionId, childSessionId, mode: 'unknown' })
   }
-  const openRun = (sessionId: string, runId?: string): void => {
+  const openRun = (sessionId: string, runId?: string, focusArtifactId?: string): void => {
     const sidebar = ctx.get('sidebarRight') as ClientContext['sidebarRight'] | undefined
-    sidebar?.openTabIn(sessionId, RUN_TAB_KIND, { params: runId === undefined ? { sessionId } : { sessionId, runId } })
+    const params = runId === undefined
+      ? { sessionId }
+      : { sessionId, runId, ...focusArtifactId === undefined ? {} : { focusArtifactId } }
+    sidebar?.openTabIn(sessionId, RUN_TAB_KIND, { params })
   }
   const cardInject = (sessionId: string) => ({
+    sessionId,
     openChild: (childSessionId: string) => openChild(sessionId, childSessionId),
-    openRun: (runId: string) => openRun(sessionId, runId),
+    openRun: (runId: string, focusArtifactId?: string) => openRun(sessionId, runId, focusArtifactId),
   })
 
   ctx.slots.inject('tool.call.toolview', function* () {

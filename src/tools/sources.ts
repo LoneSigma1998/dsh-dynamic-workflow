@@ -74,10 +74,21 @@ export function describePath(cwd: string, path: string): string {
 
 // ————————————————————————————— saved workflows —————————————————————————————
 
+const SAVED_WORKFLOW_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/u
+export const SAVED_WORKFLOW_NAME_MAX_CHARS = 64
+
+/** ZCode-parity saved workflow filename check: ASCII letters, digits, `_`, `.`, `-`, 1..64 chars, never `.` or `..`. */
+export function isValidSavedWorkflowName(name: string): boolean {
+  if (name.length === 0 || name.length > SAVED_WORKFLOW_NAME_MAX_CHARS) return false
+  if (!SAVED_WORKFLOW_NAME_PATTERN.test(name)) return false
+  return name.replaceAll('.', '').length > 0
+}
+
 export interface SavedWorkflowMeta {
   name: string
   description: string
   whenToUse?: string
+  fromRunId?: string
   args?: Record<string, { type?: 'string' | 'number' | 'boolean' | 'json'; description?: string; default?: unknown; required?: boolean }>
 }
 
@@ -120,7 +131,16 @@ export function listSavedAll(cwd: string): SavedWorkflow[] {
       try {
         const { meta, script } = stripSavedHeader(readFileSync(path, 'utf8'))
         const name = meta?.name ?? file.slice(0, -'.dwf.ts'.length)
-        out.push({ name, description: meta?.description ?? '', ...meta?.whenToUse === undefined ? {} : { whenToUse: meta.whenToUse }, ...meta?.args === undefined ? {} : { args: meta.args }, scope, path, script })
+        out.push({
+          name,
+          description: meta?.description ?? '',
+          ...meta?.whenToUse === undefined ? {} : { whenToUse: meta.whenToUse },
+          ...meta?.fromRunId === undefined ? {} : { fromRunId: meta.fromRunId },
+          ...meta?.args === undefined ? {} : { args: meta.args },
+          scope,
+          path,
+          script,
+        })
       } catch {
         // unreadable file: skip
       }
@@ -142,7 +162,16 @@ export function listSaved(cwd: string): SavedWorkflow[] {
         const { meta, script } = stripSavedHeader(readFileSync(path, 'utf8'))
         const name = meta?.name ?? file.slice(0, -'.dwf.ts'.length)
         // a project workflow hides a global one of the same name
-        out.set(name, { name, description: meta?.description ?? '', ...meta?.whenToUse === undefined ? {} : { whenToUse: meta.whenToUse }, ...meta?.args === undefined ? {} : { args: meta.args }, scope, path, script })
+        out.set(name, {
+          name,
+          description: meta?.description ?? '',
+          ...meta?.whenToUse === undefined ? {} : { whenToUse: meta.whenToUse },
+          ...meta?.fromRunId === undefined ? {} : { fromRunId: meta.fromRunId },
+          ...meta?.args === undefined ? {} : { args: meta.args },
+          scope,
+          path,
+          script,
+        })
       } catch {
         // unreadable file: skip
       }

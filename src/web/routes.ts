@@ -11,19 +11,22 @@
  * document-relative `dynamic-workflow/api/...`.
  */
 
-import { createReadStream } from 'node:fs'
+import { createReadStream, existsSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ArtifactStore } from '../service/artifacts.ts'
 import type { RunService } from '../service/run-service.ts'
 import type { LaunchConfirmation } from '../tools/confirm.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { userMessage } from '../dsh/messages.ts'
 import { resolveOwnerAgent } from '../dsh/owner.ts'
 import { compileOnce, type CompiledScript } from '../service/compile.ts'
-import { findSaved, listSavedAll, resolveSavedArgs } from '../tools/sources.ts'
+import { describePath, findSaved, isValidSavedWorkflowName, listSavedAll, resolveSavedArgs, savedDir, writeSaved } from '../tools/sources.ts'
 import { analyzeWorkflowScript } from '@zcode/dynamic-workflow'
 import { displayOf } from '../tools/tools.ts'
+import { WORKFLOW_SKILL_NAME } from '../tools/skill-gate.ts'
 
 /** Causality graphs of run scripts (pure function of the script text), bounded LRU. */
 const graphCache = new Map<string, unknown>()
@@ -110,6 +113,51 @@ async function listModelIds(ctx: Context): Promise<{ id: string; name: string }[
   return out
 }
 
+/** Build ZCode's distillation request prompt (`workflowRunSave.ts`, Apache-2.0) adapted to DSH. */
+export function buildDistillSavePrompt(input: {
+  locale: 'zh' | 'en'
+  runId: string
+  runName?: string
+  name: string
+  scope: 'project' | 'global'
+  description: string
+}): string {
+  const name = input.name.trim()
+  const description = input.description.trim()
+  const runName = input.runName?.trim()
+  if (input.locale === 'zh') {
+    const target = input.scope === 'global' ? '保存为全局工作流（scope: "global"）' : '保存到本项目'
+    return [
+      `/${WORKFLOW_SKILL_NAME} 请把刚跑完的工作流${runName ? `「${runName}」` : ''}提炼成可以复用的工作流，用 save_workflow ${target}：`,
+      '1. 脚本以这次运行实际执行的那一份为准，不要改动它的逻辑。',
+      '2. 把两次运行之间会变化的值抽成 args（写好说明与合理默认值），并补齐 description 与 whenToUse。',
+      name.length > 0 ? `3. 名字用 \`${name}\`。` : '3. 名字请你来取（只能用字母、数字和 - _ .）。',
+      description.length > 0 ? `4. 说明可以参考：${description}` : '',
+      `5. 调用 save_workflow 时带上 from_run_id: "${input.runId}"——这次运行要据此认出自己已被保存。`,
+    ].filter(line => line.length > 0).join('\n')
+  }
+  const target = input.scope === 'global' ? 'save it as a global workflow (scope: "global")' : 'save it to this project'
+  return [
+    `/${WORKFLOW_SKILL_NAME} Please distill the workflow that just finished${runName ? ` ("${runName}")` : ''} into a reusable one and ${target} with save_workflow:`,
+    '1. Use the script this run actually executed; do not change its logic.',
+    '2. Lift the values that change between runs into args (with descriptions and sensible defaults), and write description and whenToUse.',
+    name.length > 0 ? `3. Name it \`${name}\`.` : '3. Pick the name yourself (letters, digits and - _ . only).',
+    description.length > 0 ? `4. For the description, start from: ${description}` : '',
+    `5. Pass from_run_id: "${input.runId}" to save_workflow, so that run can tell it has been saved.`,
+  ].filter(line => line.length > 0).join('\n')
+}
+
+function findSavedForRun(cwd: string | undefined, runId: string, runName?: string): { name: string; scope: 'project' | 'global'; hasRequiredArgs: boolean } | null {
+  if (cwd === undefined) return null
+  const all = listSavedAll(cwd)
+  // Prefer project over global when matching by fromRunId (or exact valid name match)
+  const hit = [...all].reverse().find(item => item.fromRunId === runId)
+    ?? (runName !== undefined && isValidSavedWorkflowName(runName) ? [...all].reverse().find(item => item.name === runName) : undefined)
+  if (hit === undefined) return null
+  const hasRequiredArgs = Object.values(hit.args ?? {}).some(spec => spec.required === true && spec.default === undefined)
+  return { name: hit.name, scope: hit.scope, hasRequiredArgs }
+}
+
 interface AccessLike {
   enabled: boolean
   mode: string
@@ -172,7 +220,27 @@ export function registerWorkflowRoutes(ctx: Context, deps: { service: RunService
             const snapshot = deps.service.snapshot(runId)
             const row = deps.service.journal.getRun(runId)
             const script = deps.service.liveRun(runId)?.scriptText ?? row?.scriptText ?? null
-            json(res, 200, { snapshot, script, graph: script === null ? null : graphOfScript(script), parentSessionId: row?.parentSessionId ?? null })
+            const spans = deps.service.journal.listRunLifeSpans(runId)
+            const durationMs = spans.length === 0 ? null : spans.reduce((sum, s) => sum + Math.max(0, s.lastActivityAt - s.startedAt), 0)
+            const savedAs = findSavedForRun(row?.cwd, runId, snapshot.name)
+            const canSave = script !== null && (row?.cwd !== undefined || row?.parentSessionId !== undefined)
+            json(res, 200, { snapshot, script, graph: script === null ? null : graphOfScript(script), parentSessionId: row?.parentSessionId ?? null, durationMs, savedAs, canSave })
+            return
+          }
+          // GET runs/:runId/save-probe?name=…&scope=project|global — debounced collision & shadowing check
+          if (method === 'GET' && segments[0] === 'runs' && segments[2] === 'save-probe' && segments.length === 3) {
+            const runId = segments[1]!
+            const row = deps.service.journal.getRun(runId)
+            const name = (url.searchParams.get('name') ?? '').trim()
+            const scope: 'project' | 'global' = url.searchParams.get('scope') === 'global' ? 'global' : 'project'
+            if (row?.cwd === undefined || !isValidSavedWorkflowName(name)) {
+              json(res, 200, { taken: false, shadowing: false })
+              return
+            }
+            const other: 'project' | 'global' = scope === 'global' ? 'project' : 'global'
+            const taken = existsSync(join(savedDir(row.cwd, scope), `${name}.dwf.ts`))
+            const shadowing = existsSync(join(savedDir(row.cwd, other), `${name}.dwf.ts`))
+            json(res, 200, { taken, shadowing })
             return
           }
           // GET runs/:runId/nodes — the script-steps lane and per-task results
@@ -258,8 +326,9 @@ export function registerWorkflowRoutes(ctx: Context, deps: { service: RunService
             const saved = listSavedAll(cwd).map(item => ({
               name: item.name, description: item.description, scope: item.scope,
               ...item.whenToUse === undefined ? {} : { whenToUse: item.whenToUse },
+              ...item.fromRunId === undefined ? {} : { fromRunId: item.fromRunId },
               ...item.args === undefined ? {} : { args: item.args },
-              runs: history.filter(row => row.name === item.name).slice(0, 5).map(row => ({ runId: row.runId, status: row.status, ...row.stopReason === undefined ? {} : { stopReason: row.stopReason }, updated: row.updated, spentTokens: row.spentTokens, mine: row.parentSessionId === segments[1] })),
+              runs: history.filter(row => row.name === item.name || row.runId === item.fromRunId).slice(0, 5).map(row => ({ runId: row.runId, status: row.status, ...row.stopReason === undefined ? {} : { stopReason: row.stopReason }, updated: row.updated, spentTokens: row.spentTokens, mine: row.parentSessionId === segments[1] })),
             }))
             json(res, 200, { saved, available: true, canRun: deps.access?.enabled !== false })
             return
@@ -368,6 +437,72 @@ export function registerWorkflowRoutes(ctx: Context, deps: { service: RunService
               }
               deps.access?.activate(parent)
               json(res, 200, await deps.service.configure(runId, parent, { ...max === undefined ? {} : { maxConcurrency: max }, ...model === undefined ? {} : { subagentModel: model } }))
+              return
+            }
+            if (action === 'save') {
+              // Direct GUI save ("按原样直接保存"): the click is the user's consent, no model turn.
+              const body = await readBody(req)
+              const name = typeof body.name === 'string' ? body.name.trim() : ''
+              if (!isValidSavedWorkflowName(name)) {
+                json(res, 400, { ok: false, reason: 'invalid_name', message: 'Invalid workflow file name.' })
+                return
+              }
+              const scope: 'project' | 'global' = body.scope === 'global' ? 'global' : 'project'
+              const row = deps.service.journal.getRun(runId)
+              const script = deps.service.liveRun(runId)?.scriptText ?? row?.scriptText
+              const parent = row?.parentSessionId === undefined ? undefined : await resolveOwnerAgent(ctx, row.parentSessionId)
+              const cwd = row?.cwd ?? parent?.session.header.cwd
+              if (script === undefined || cwd === undefined) {
+                json(res, 404, { ok: false, reason: 'missing_run', message: 'Run script or workspace is not available.' })
+                return
+              }
+              const analysis = analyzeWorkflowScript(script)
+              if (!analysis.ok) {
+                json(res, 422, { ok: false, reason: 'compile_failed', message: 'The run script does not compile.' })
+                return
+              }
+              const targetPath = join(savedDir(cwd, scope), `${name}.dwf.ts`)
+              if (existsSync(targetPath) && body.overwrite !== true) {
+                json(res, 200, { ok: false, reason: 'target_exists' })
+                return
+              }
+              const description = typeof body.description === 'string' && body.description.trim() !== '' ? body.description.trim() : (row?.name ?? name)
+              const written = writeSaved(cwd, scope, { name, description, fromRunId: runId }, script)
+              json(res, 200, { ok: true, name, scope, path: describePath(cwd, written) })
+              return
+            }
+            if (action === 'distill') {
+              // ZCode's "让 ZCode 帮我提炼保存": sends the distillation prompt into the owning session.
+              if (deps.access?.enabled === false) {
+                json(res, 409, { ok: false, message: 'Dynamic workflows are disabled in this deployment.' })
+                return
+              }
+              const body = await readBody(req)
+              const row = deps.service.journal.getRun(runId)
+              const parent = row?.parentSessionId === undefined ? undefined : await resolveOwnerAgent(ctx, row.parentSessionId)
+              if (parent === undefined) {
+                json(res, 409, { ok: false, message: 'The session that owns this run is not available.' })
+                return
+              }
+              const name = typeof body.name === 'string' ? body.name.trim() : ''
+              const scope: 'project' | 'global' = body.scope === 'global' ? 'global' : 'project'
+              const description = typeof body.description === 'string' ? body.description.trim() : ''
+              const rawLocale = typeof body.locale === 'string' ? body.locale.toLowerCase() : ''
+              const locale: 'zh' | 'en' = rawLocale.startsWith('en') ? 'en' : rawLocale.startsWith('zh') ? 'zh' : (/[\u4e00-\u9fff]/u.test(row?.name ?? description) ? 'zh' : 'en')
+              const prompt = buildDistillSavePrompt({
+                locale,
+                runId,
+                ...row?.name === undefined ? {} : { runName: row.name },
+                name,
+                scope,
+                description,
+              })
+              deps.access?.activate(parent)
+              const message = userMessage(prompt, { kind: 'user' })
+              const live = parent as unknown as { status?: string; followup(m: unknown): void; steer?(m: unknown): void }
+              if (live.status === 'idle' || live.steer === undefined) live.followup(message)
+              else live.steer(message)
+              json(res, 200, { ok: true, sessionId: row?.parentSessionId })
               return
             }
             if (action === 'resume') {

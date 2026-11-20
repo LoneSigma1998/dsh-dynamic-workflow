@@ -11,6 +11,7 @@ import { ConfirmCard } from '../../src/client/ConfirmCard.tsx'
 import type { PartialArguments, PendingQuestionLike, ToolCallViewProps, Translate } from '../../src/client/host-types.ts'
 import { en, zh } from '../../src/client/locales.ts'
 import { NoticeChip, noticeDefinition, type NoticeData } from '../../src/client/notice.tsx'
+import { RunNode } from '../../src/client/RunNode.tsx'
 import { RunPane } from '../../src/client/RunPane.tsx'
 import { WorkflowToolCard } from '../../src/client/WorkflowToolCard.tsx'
 import { applyProgressEvent } from '../../src/web/projection.ts'
@@ -71,8 +72,11 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.includes('/pending-launch')) {
     return Response.json({ pending: { tool: 'create_workflow', name: fan.title, scriptText: fan.script, display: fan.display, settings: { maxConcurrency: 8, subagentModel: 'deepseek/deepseek-v4-flash' }, askedAt: Date.now() } })
   }
+  if (url.includes('/nodes')) return Response.json({ nodes: [] })
+  if (url.includes('/changes')) return Response.json({ changes: [] })
+  if (url.includes('/save-probe')) return Response.json({ taken: false, shadowing: false })
   if (url.includes(`runs/${encodeURIComponent(live.display.runId)}`)) {
-    return Response.json({ snapshot: { name: live.display.name, logTail: [], artifacts: [{ id: 'summary', kind: 'markdown', title: 'Review summary', primary: true, version: 1 }] }, script: liveArgs.script, graph: live.display.causalityGraph })
+    return Response.json({ snapshot: { name: live.display.name, status: 'completed', spentTokens: 23_695_436, logTail: [], artifacts: [{ id: 'summary', kind: 'markdown', title: 'Review summary', primary: true, version: 1 }] }, script: liveArgs.script, graph: live.display.causalityGraph, durationMs: 312_000, savedAs: null, canSave: true })
   }
   return originalFetch(input, init)
 }) as typeof fetch
@@ -140,7 +144,7 @@ function App() {
     ['1 · Writing the script (streaming draft)', <Card key="a" props={{ phase: 'preparing', callId: 'c-draft', toolName: 'create_workflow', block: { phase: 'preparing', callId: 'c-draft', name: 'create_workflow', turn: 1, step: 1, time: 0, args: args({ name: rich.title, script: partial }, false) } } as never} />],
     ['2 · Confirmation in the composer seat', <ConfirmCard key="b" matched={{ pending, item: pending.questions[0]! }} t={t} />],
     ['3 · Live run (mid-run, from the real progress records)', <Card key="c" props={{ phase: 'result', callId: live.call.callId, toolName: 'create_workflow', state: mid, block: { kind: 'tool-result', seq: 9, time: 0, callId: live.call.callId, name: 'create_workflow', args: args({}), call: { name: 'create_workflow', argsRaw: live.call.arguments }, content: [{ type: 'text', text: 'launched' }], isError: false, meta: live.display } } as never} />],
-    ['4 · Completed run', <Card key="d" props={{ phase: 'result', callId: live.call.callId, toolName: 'create_workflow', state: done, block: { kind: 'tool-result', seq: 9, time: 0, callId: live.call.callId, name: 'create_workflow', args: args({}), call: { name: 'create_workflow', argsRaw: live.call.arguments }, content: [{ type: 'text', text: 'launched' }], isError: false, meta: live.display } } as never} />],
+    ['4 · Completed run (turn-level RunNode)', <RunNode key="d" node={{ data: { runId: live.display.runId, toolCallId: live.call.callId } }} t={t} sessionId={SESSION} useProjection={((_k: string, sel?: (v: WorkflowRunsState) => unknown) => (sel === undefined ? done : sel(done))) as never} openChild={id => console.log('openChild', id)} openRun={id => console.log('openRun', id)} />],
     ['5 · Rich graph (loop with back edge), static', <Card key="e" props={{ phase: 'result', callId: 'c-rich', toolName: 'create_workflow', block: { kind: 'tool-result', seq: 9, time: 0, callId: 'c-rich', name: 'create_workflow', args: args({}), call: { name: 'create_workflow', argsRaw: JSON.stringify({ name: rich.title, script: rich.script }) }, content: [], isError: false, meta: { ...rich.display, runId: undefined } } } as never} />],
     ['6 · Typecheck failure', <Card key="f" props={{ phase: 'result', callId: 'c-bad', toolName: 'create_workflow', block: { kind: 'tool-result', seq: 9, time: 0, callId: 'c-bad', name: 'create_workflow', args: args({}), call: { name: 'create_workflow', argsRaw: JSON.stringify({ name: 'broken-script', script: 'const x: number = "nope"' }) }, content: [], isError: true, meta: FIXTURES.diagnostics } } as never} />],
     ['7 · Notice chip (terminal notification, expanded)', <NoticeDisclosure key="g" />],

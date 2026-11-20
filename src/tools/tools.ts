@@ -533,7 +533,8 @@ export function registerWorkflowTools(deps: ToolDeps): void {
         scope: { type: 'string', enum: ['project', 'global'] },
         script: { type: 'string' },
         script_path: { type: 'string' },
-        run_id: { type: 'string', description: 'Save the effective script of this run.' },
+        run_id: { type: 'string', description: 'Save the effective script of this run (when neither script nor script_path is given), or link provenance to that run.' },
+        from_run_id: { type: 'string', description: 'Provenance only: the id of the run this workflow was distilled from, so that run knows it has been saved.' },
         args: { type: 'object', description: 'Declared arguments: { name: { type, description, default, required } }.' },
       },
       required: ['name', 'description', 'scope'],
@@ -567,9 +568,11 @@ export function registerWorkflowTools(deps: ToolDeps): void {
       if (decision.kind !== 'allow') {
         return { ok: false, text: 'The user declined to save this workflow. Nothing was written.' }
       }
+      const fromRunId = str(args.from_run_id) ?? str(args.run_id)
       const path = writeSaved(cwd, scope, {
         name: workflowName, description,
         ...typeof args.whenToUse === 'string' ? { whenToUse: args.whenToUse } : {},
+        ...fromRunId === undefined ? {} : { fromRunId },
         ...typeof args.args === 'object' && args.args !== null ? { args: args.args as never } : {},
       }, script)
       return { ok: true, text: `Saved "${workflowName}" at ${describePath(cwd, path)}. Run it with create_workflow { saved: { name: "${workflowName}" } }.` }

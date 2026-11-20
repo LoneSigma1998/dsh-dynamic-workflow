@@ -99,9 +99,30 @@ export function shortModel(label: string): string {
 }
 
 export function formatTokens(value: number): string {
-  if (value < 1000) return String(value)
-  if (value < 1_000_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}k`
-  return `${(value / 1_000_000).toFixed(1)}M`
+  if (value < 1000) return value.toLocaleString('en-US')
+  if (value < 1_000_000) return `${(value / 1000).toFixed(1)}k`
+  return `${(value / 1_000_000).toFixed(2)}M`
+}
+
+export function formatExactTokens(value: number): string {
+  return value.toLocaleString('en-US')
+}
+
+export function formatDuration(ms: number | null | undefined, zh: boolean): string | undefined {
+  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms <= 0) return undefined
+  const totalSec = Math.max(1, Math.round(ms / 1000))
+  const hours = Math.floor(totalSec / 3600)
+  const mins = Math.floor((totalSec % 3600) / 60)
+  const secs = totalSec % 60
+  if (hours > 0) return zh ? `${hours}h ${mins}m` : `${hours}h ${mins}m`
+  if (mins > 0) return `${mins}m ${secs}s`
+  return `${secs}s`
+}
+
+export function runKindText(run: WorkflowRunState | undefined, t: Translate): string {
+  if (run === undefined) return t('card.title')
+  if (run.status === 'stopped' && run.stopReason === 'superseded') return t('card.kind.superseded')
+  return t(`card.kind.${run.status}` as Parameters<Translate>[0])
 }
 
 /** Steps done / total, through the projection's one sanctioned reading (it counts unlisted nodes too). */

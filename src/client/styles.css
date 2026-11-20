@@ -5,6 +5,83 @@
  * lamp at x+17, pills 32px tall with a 6px gap.
  */
 
+/* ——— Subagent tile face (`AgentFace.tsx`, ported from ZCode Apache-2.0) ——— */
+.wf-face {
+  --wf-face-eye: #ffffff;
+  --wf-face-x: 0px;
+  --wf-face-y: 0px;
+  --wf-face-blinks: 2;
+  --wf-face-blink-time: 260ms;
+  --wf-face-floats: 1;
+  display: block;
+  flex: none;
+  overflow: visible;
+}
+.wf-face [data-eye-expression] { display: none; }
+.wf-face[data-expression='dots'] [data-eye-expression='dots'],
+.wf-face[data-expression='pill'] [data-eye-expression='pill'],
+.wf-face[data-expression='happy'] [data-eye-expression='happy'],
+.wf-face[data-expression='sleepy'] [data-eye-expression='sleepy'],
+.wf-face[data-expression='focused'] [data-eye-expression='focused'],
+.wf-face[data-expression='sad'] [data-eye-expression='sad'],
+.wf-face[data-expression='confused'] [data-eye-expression='confused'] { display: inline; }
+.wf-face-closed { opacity: 0; }
+.wf-face-eyes {
+  transform: translate(var(--wf-face-x), var(--wf-face-y));
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.wf-face-lids,
+.wf-face-closed,
+.wf-face-bounce {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.wf-face[data-motion='blink'] .wf-face-lids {
+  animation: wf-face-blink var(--wf-face-blink-time) ease-in-out var(--wf-face-blinks);
+}
+.wf-face[data-motion='blink'] .wf-face-closed {
+  animation: wf-face-closed-blink var(--wf-face-blink-time) ease-in-out var(--wf-face-blinks);
+}
+.wf-face[data-motion='morph'] .wf-face-lids {
+  animation: wf-face-morph 180ms ease-in-out 1;
+}
+.wf-face[data-motion='morph'] .wf-face-closed {
+  animation: wf-face-closed-morph 180ms ease-in-out 1;
+}
+.wf-face[data-motion='float'] .wf-face-bounce {
+  animation: wf-face-float 600ms ease-in-out var(--wf-face-floats);
+}
+.wf-face[data-motion='dots-wave'] [data-eye-expression='dots'] circle {
+  animation: wf-face-dot-float 680ms ease-in-out 1;
+}
+.wf-face[data-motion='dots-wave'] [data-eye-expression='dots'] circle:nth-child(2) { animation-delay: 110ms; }
+.wf-face[data-motion='dots-wave'] [data-eye-expression='dots'] circle:nth-child(3) { animation-delay: 220ms; }
+
+@keyframes wf-face-blink {
+  0%, 100% { opacity: 1; transform: scaleY(1); }
+  42%, 58% { opacity: 0; transform: scaleY(0.15); }
+}
+@keyframes wf-face-closed-blink {
+  0%, 34%, 66%, 100% { opacity: 0; }
+  45%, 55% { opacity: 1; }
+}
+@keyframes wf-face-morph {
+  0%, 100% { opacity: 1; transform: scaleY(1); }
+  45%, 55% { opacity: 0; transform: scaleY(0.2); }
+}
+@keyframes wf-face-closed-morph {
+  0%, 35%, 65%, 100% { opacity: 0; }
+  45%, 55% { opacity: 1; }
+}
+@keyframes wf-face-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(1.2px); }
+}
+@keyframes wf-face-dot-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1.5px); }
+}
+
 /* ——— chat card (tool card + turn-level run card) ——— */
 .dwf-card {
   --dwf-surface: var(--dsw-alias-bg-module-platform, var(--dsw-alias-bg-layer-1));
@@ -42,10 +119,33 @@
   color: var(--dsw-alias-label-secondary);
   flex: none;
 }
+.dwf-card-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dsw-alias-label-tertiary);
+  flex: none;
+}
 .dwf-card-kind {
   color: var(--dsw-alias-label-tertiary);
   font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
   flex: none;
+}
+.dwf-card-kind-strong {
+  flex: none;
+  font: var(--dsw-font-xs-strong-13, 600 13.5px/20px sans-serif);
+  color: var(--dsw-alias-label-primary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.dwf-card-run-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xs-13, 13px/20px sans-serif);
 }
 .dwf-card-title {
   flex: 0 1 auto;
@@ -74,10 +174,42 @@
 .dwf-card-actions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   margin-left: auto;
   flex: none;
 }
+.dwf-card-head-summary,
+.dwf-card-live-tokens {
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  margin-right: 2px;
+}
+.dwf-expand-btn {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+@media (hover: hover) {
+  .dwf-expand-btn:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+    color: var(--dsw-alias-label-primary);
+  }
+}
+.dwf-expand-btn:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, currentColor);
+}
+
 /*
  * Every item carries its own leading "·"; the box is pulled 14px left and clipped back at its
  * true edge, so the separator of whichever item starts a line (the first, or one that wrapped)
@@ -95,7 +227,8 @@
   font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
   font-variant-numeric: tabular-nums;
 }
-.dwf-card-meta > * {
+.dwf-card-meta > *,
+.dwf-card-meta > .dwf-link {
   position: relative;
   padding-left: var(--dwf-sep);
 }
@@ -210,6 +343,10 @@
 .dwf-link:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, currentColor); border-radius: 3px; }
 
 /* ——— horizontal timeline ——— */
+.dwf-timeline-wrap {
+  position: relative;
+  min-width: 0;
+}
 .dwf-timeline-scroll {
   flex: none;
   overflow-x: auto;
@@ -218,7 +355,7 @@
   scrollbar-color: transparent transparent;
   margin: 0 -4px;
   padding: 2px 4px 6px;
-  --dwf-fade: 32px;
+  --dwf-fade: 36px;
 }
 .dwf-timeline-scroll:hover {
   scrollbar-color: var(--dsw-alias-scrollbar-bg-l2, var(--dsw-alias-border-l2)) transparent;
@@ -246,6 +383,34 @@
 .dwf-timeline-scroll[data-fade='both'] {
   -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--dwf-fade), #000 calc(100% - var(--dwf-fade)), transparent);
   mask-image: linear-gradient(to right, transparent, #000 var(--dwf-fade), #000 calc(100% - var(--dwf-fade)), transparent);
+}
+.dwf-timeline-more-badge {
+  position: absolute;
+  right: 2px;
+  top: 6px;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dwf-surface, var(--dsw-alias-bg-base)) 85%, transparent);
+  color: var(--dsw-alias-label-tertiary);
+}
+.dwf-timeline-more-badge[data-done] {
+  color: var(--dsw-alias-state-success-primary);
+}
+.dwf-timeline-more-badge > i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  display: block;
+}
+.dwf-timeline-more-badge > b {
+  width: 6px;
+  height: 1.5px;
+  background: currentColor;
+  display: block;
 }
 .dwf-timeline {
   position: relative;
@@ -301,6 +466,7 @@
 .dwf-lamp-failed { border: 0; background: var(--dsw-alias-state-error-primary); }
 .dwf-lamp-hole { border-style: dashed; background: var(--dwf-surface, transparent); }
 .dwf-lamp-typing { border-color: var(--dsw-alias-label-secondary); }
+.dwf-station[data-unreached] .dwf-lamp { opacity: 0.5; }
 @keyframes dwf-pulse {
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--dsw-alias-state-business-primary) 48%, transparent); }
   70% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--dsw-alias-state-business-primary) 0%, transparent); }
@@ -320,6 +486,7 @@
   white-space: nowrap;
   background: var(--dwf-surface, var(--dsw-alias-bg-base));
 }
+.dwf-station[data-unreached] .dwf-station-caption { opacity: 0.52; }
 .dwf-station-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -344,8 +511,9 @@
 }
 @keyframes dwf-blink { 50% { opacity: 0; } }
 
-/* ——— subagent pills ——— */
+/* ——— subagent & script pills ——— */
 .dwf-pill {
+  --dwf-pill-bg: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1)));
   position: absolute;
   left: 0;
   width: 168px;
@@ -354,14 +522,14 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 10px 0 5px;
+  padding: 0 9px 0 6px;
   border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: 999px;
-  background: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1)));
+  border-radius: 10px;
+  background: var(--dwf-pill-bg);
   color: var(--dsw-alias-label-primary);
   font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
   text-align: left;
-  transition: background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+  transition: background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, opacity 0.14s ease;
 }
 .dwf-pill[data-status='running'] {
   border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 58%, transparent);
@@ -371,10 +539,16 @@
   border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 58%, transparent);
 }
 .dwf-pill[data-status='pending'] { color: var(--dsw-alias-label-secondary); }
+.dwf-pill[data-unreached],
+.dwf-spine-pill[data-unreached],
+.dwf-spine-section[data-unreached] .dwf-spine-head {
+  opacity: 0.45;
+}
 .dwf-pill-button { cursor: pointer; }
 @media (hover: hover) {
   .dwf-pill-button:hover {
-    background: var(--dsw-alias-card-fill-hover, var(--dsw-alias-interactive-bg-hover));
+    --dwf-pill-bg: var(--dsw-alias-card-fill-hover, var(--dsw-alias-interactive-bg-hover));
+    background: var(--dwf-pill-bg);
     border-color: var(--dsw-alias-border-l3, var(--dsw-alias-border-l2));
   }
 }
@@ -400,43 +574,126 @@
 }
 .dwf-pill-failed { flex: none; color: var(--dsw-alias-state-error-primary); font-weight: 500; }
 .dwf-pill-more { border-style: dashed; color: var(--dsw-alias-label-secondary); }
-
-/* High-contrast jewel-tone role badges — crisp on both dark and light themes */
-.dwf-avatar {
+.dwf-pill-open-arrow {
   flex: none;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--dsw-alias-label-tertiary);
+  opacity: 0;
+  transition: opacity 0.14s ease;
+}
+@media (hover: hover) {
+  .dwf-pill-button:hover .dwf-pill-open-arrow { opacity: 0.85; }
+}
+.dwf-script-glyph {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
   display: inline-grid;
   place-items: center;
-  font: 600 11px/1 sans-serif;
-  color: #fff;
-  background: linear-gradient(
-    135deg,
-    hsl(var(--dwf-hue, 221) 72% 54%),
-    hsl(calc(var(--dwf-hue, 221) + 16) 68% 43%)
-  );
-  box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.22);
-  text-shadow: 0 1px 1px rgb(0 0 0 / 0.18);
-}
-.dwf-avatar-script {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-mask-2, var(--dsw-alias-bg-mask-1));
-  box-shadow: inset 0 0 0 0.5px var(--dsw-alias-border-l2);
-  text-shadow: none;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-mask-1, var(--dsw-alias-fill-tsp-secondary));
   font-family: var(--ds-font-family-code, ui-monospace, monospace);
-  font-size: 9.5px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 600;
   letter-spacing: -0.05em;
 }
-.dwf-avatar-small {
-  width: 15px;
-  height: 15px;
-  font-size: 8px;
-  margin-right: -5px;
-  box-shadow: 0 0 0 1.5px var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1));
+.dwf-script-glyph-sm {
+  width: 18px;
+  height: 18px;
+  border-radius: 5.5px;
+  font-size: 9px;
 }
-.dwf-deck { display: inline-flex; padding-left: 3px; margin-right: 6px; }
+.dwf-script-check {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  opacity: 0.8;
+}
+.dwf-deck { display: inline-flex; align-items: center; padding-left: 2px; margin-right: 4px; }
+.dwf-deck-face { margin-right: -4px; }
+.dwf-deck-face:last-child { margin-right: 0; }
+
+/* ——— chat card artifact pills & 4-column receipt figures ——— */
+.dwf-artifact-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 0.5px solid color-mix(in srgb, var(--dsw-alias-border-l2) 72%, transparent);
+}
+.dwf-artifact-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1)));
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxs-12, 500 12px/18px sans-serif);
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+.dwf-artifact-pill-subtle {
+  color: var(--dsw-alias-label-secondary);
+  background: transparent;
+}
+@media (hover: hover) {
+  .dwf-artifact-pill:hover {
+    background: var(--dsw-alias-card-fill-hover, var(--dsw-alias-interactive-bg-hover));
+    border-color: var(--dsw-alias-border-l3, var(--dsw-alias-border-l2));
+  }
+}
+.dwf-artifact-pill-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--dsw-alias-label-secondary);
+}
+.dwf-md-glyph {
+  display: inline-block;
+  font: 700 10px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.04em;
+  color: var(--dsw-alias-state-business-primary, #3b82f6);
+}
+.dwf-artifact-pill-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dwf-receipt-figures {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 0.5px solid color-mix(in srgb, var(--dsw-alias-border-l2) 65%, transparent);
+}
+.dwf-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.dwf-figure-val {
+  font: var(--dsw-font-xs-strong-13, 600 13px/18px sans-serif);
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dwf-figure-lbl {
+  font: var(--dsw-font-xxxs-11, 11px/15px sans-serif);
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ——— script disclosure in the card ——— */
 .dwf-script-row { margin-top: -2px; }
@@ -507,6 +764,122 @@
   padding-bottom: 10px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
 }
+.dwf-pane-header-block {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-bottom: 12px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+}
+.dwf-pane-top-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.dwf-action-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 27px;
+  padding: 0 9px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 7px;
+  background: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1));
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxs-12, 500 12px/18px sans-serif);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease, opacity 0.14s ease;
+}
+@media (hover: hover) {
+  .dwf-action-pill:hover:not(:disabled) {
+    background: var(--dsw-alias-card-fill-hover, var(--dsw-alias-interactive-bg-hover));
+    border-color: var(--dsw-alias-border-l3, var(--dsw-alias-border-l2));
+  }
+}
+.dwf-action-pill:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+.dwf-action-pill:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, currentColor);
+}
+.dwf-pane-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
+  color: var(--dsw-alias-label-secondary);
+}
+.dwf-pane-status-word {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+.dwf-pane-status-word[data-status='completed'] {
+  color: var(--dsw-alias-state-success-primary);
+}
+.dwf-pane-status-word[data-status='errored'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+.dwf-pane-model-chip {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-mask-1, var(--dsw-alias-fill-tsp-secondary));
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxxs-11, 11px/16px sans-serif);
+}
+.dwf-pane-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
+  font-variant-numeric: tabular-nums;
+}
+.dwf-pane-summary-icon {
+  font-size: 11px;
+  opacity: 0.75;
+  margin-right: 2px;
+}
+.dwf-pane-summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.dwf-pane-dot { opacity: 0.6; }
+
+.dwf-pane-result-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 12px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+}
+.dwf-pane-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.dwf-pane-result-label {
+  font: var(--dsw-font-xxxs-11, 600 11.5px/16px sans-serif);
+  color: var(--dsw-alias-label-tertiary);
+}
+.dwf-pane-result-hint {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xs-13, 13px/20px sans-serif);
+}
+.dwf-raw-toggle {
+  font: var(--dsw-font-xxxs-11, 11.5px/16px sans-serif);
+}
+
 .dwf-icon-btn {
   flex: none;
   width: 26px;
@@ -573,6 +946,200 @@
 .dwf-roll-phase { display: flex; align-items: center; gap: 6px; font: var(--dsw-font-xxs-strong-12, 600 12px/18px sans-serif); color: var(--dsw-alias-label-secondary); }
 .dwf-roll-row { padding-left: 16px; font: var(--dsw-font-xxs-12, 12px/18px sans-serif); }
 
+/* ——— Save & Distill Workflow popover (`SavePopover.tsx`) ——— */
+.dwf-save-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.dwf-save-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dwf-saved-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 25px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 14%, transparent);
+  color: var(--dsw-alias-state-success-primary);
+  font: var(--dsw-font-xxxs-strong-11, 600 11px/16px sans-serif);
+  white-space: nowrap;
+}
+.dwf-save-toast {
+  font: var(--dsw-font-xxxs-11, 11px/16px sans-serif);
+  color: var(--dsw-alias-state-success-primary);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dwf-save-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 80;
+  width: 316px;
+  max-width: calc(100vw - 28px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 0.5px solid var(--dsw-alias-border-l3, var(--dsw-alias-border-l2));
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-base)));
+  color: var(--dsw-alias-label-primary);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.24), 0 2px 6px rgb(0 0 0 / 0.12);
+  text-align: left;
+  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
+  white-space: normal;
+}
+.dwf-save-pop-title {
+  font: var(--dsw-font-s-strong-14, 600 14px/20px sans-serif);
+  color: var(--dsw-alias-label-primary);
+}
+.dwf-save-lead-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-bg-base);
+  font: var(--dsw-font-xs-strong-13, 600 13px/20px sans-serif);
+  cursor: pointer;
+  transition: opacity 0.14s ease;
+}
+@media (hover: hover) {
+  .dwf-save-lead-btn:hover:not(:disabled) { opacity: 0.9; }
+}
+.dwf-save-lead-btn:disabled { opacity: 0.5; cursor: default; }
+.dwf-save-hint {
+  margin: -4px 0 0;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxxs-11, 11.5px/16px sans-serif);
+}
+.dwf-save-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxxs-11, 11px/16px sans-serif);
+}
+.dwf-save-divider::before,
+.dwf-save-divider::after {
+  content: '';
+  flex: 1;
+  height: 0.5px;
+  background: var(--dsw-alias-border-l2);
+}
+.dwf-save-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dwf-save-label {
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxxs-strong-11, 500 11.5px/16px sans-serif);
+}
+.dwf-save-name-box {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 10px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base, transparent);
+}
+.dwf-save-name-box:focus-within {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+.dwf-save-name-box[data-invalid] {
+  border-color: var(--dsw-alias-state-error-primary);
+}
+.dwf-save-name-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxs-12, 12.5px/18px var(--ds-font-family-code, ui-monospace, monospace));
+}
+.dwf-save-ext {
+  flex: none;
+  margin-left: 6px;
+  color: var(--dsw-alias-label-tertiary);
+  font: 11.5px/16px var(--ds-font-family-code, ui-monospace, monospace);
+}
+.dwf-save-select,
+.dwf-save-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base, transparent);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+}
+.dwf-save-select { height: 32px; cursor: pointer; }
+.dwf-save-textarea { resize: vertical; min-height: 52px; }
+.dwf-save-select:focus-visible,
+.dwf-save-textarea:focus-visible {
+  outline: none;
+  border-color: var(--dsw-alias-state-business-primary);
+}
+.dwf-save-subhint {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxxs-11, 11px/15px sans-serif);
+}
+.dwf-save-warn {
+  margin: 0;
+  color: var(--dsw-alias-state-warn-primary, #d97706);
+  font: var(--dsw-font-xxxs-11, 11px/15px sans-serif);
+}
+.dwf-save-path {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxxs-11, 11px/16px sans-serif);
+  word-break: break-word;
+}
+.dwf-save-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+.dwf-save-direct-btn {
+  height: 30px;
+  padding: 0 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1));
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxs-strong-12, 500 12px/18px sans-serif);
+  cursor: pointer;
+  transition: background-color 0.14s ease, opacity 0.14s ease;
+}
+@media (hover: hover) {
+  .dwf-save-direct-btn:hover:not(:disabled) {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+.dwf-save-direct-btn:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
 /* ——— session run list (home view) ——— */
 .dwf-run-list {
   margin: 0;
@@ -638,14 +1205,24 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dwf-ink-march, .dwf-lamp-running, .dwf-caret, .dwf-timeline-draft .dwf-station { animation: none; }
+  .dwf-ink-march,
+  .dwf-lamp-running,
+  .dwf-caret,
+  .dwf-timeline-draft .dwf-station,
+  .wf-face .wf-face-lids,
+  .wf-face .wf-face-closed,
+  .wf-face .wf-face-bounce,
+  .wf-face [data-eye-expression='dots'] circle {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 /* long results stay compact on the run card */
 .dwf-outcome pre.dwf-clamped { max-height: 9.5em; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent); mask-image: linear-gradient(to bottom, #000 70%, transparent); }
 .dwf-outcome pre { max-height: 480px; }
 .dwf-more { align-self: flex-start; font: var(--dsw-font-xxs-12, 12px/18px sans-serif); }
-.dwf-pane-result { white-space: pre-wrap; word-break: break-word; max-height: none; }
+.dwf-pane-result { white-space: pre-wrap; word-break: break-word; max-height: 360px; margin-top: 6px; }
 .dwf-retune { display: inline-flex; align-items: center; gap: 4px; }
 .dwf-step {
   width: 20px; height: 20px; padding: 0;
@@ -708,15 +1285,19 @@
 }
 .dwf-configure-hint { margin: 0; font: var(--dsw-font-xxs-12, 12px/18px sans-serif); }
 
-/* ——— artifacts ——— */
+/* ——— artifacts (pane) ——— */
 .dwf-artifact {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 11px 13px;
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-md, 10px);
   background: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1));
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.dwf-artifact[data-focused] {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, var(--dsw-alias-border-l2));
 }
 .dwf-artifact + .dwf-artifact { margin-top: 2px; }
 .dwf-artifact-head {
@@ -729,7 +1310,7 @@
 .dwf-artifact-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
   padding: 0;
   border: 0;
@@ -737,6 +1318,12 @@
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
   text-align: left;
+}
+.dwf-artifact-head-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--dsw-alias-label-secondary);
 }
 .dwf-artifact-title {
   min-width: 0;
@@ -762,19 +1349,46 @@
 .dwf-artifact-meta {
   font: var(--dsw-font-xxxs-11, 11px/16px sans-serif);
   font-variant-numeric: tabular-nums;
-}
-.dwf-artifact-download { margin-left: auto; flex: none; font-size: 12px; }
-.dwf-artifact-body { max-height: 420px; overflow: auto; }
-.dwf-artifact-image { max-width: 100%; border-radius: 6px; }
-.dwf-artifact-strip { display: flex; flex-wrap: wrap; gap: 6px; }
-.dwf-artifact-chip {
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
-  font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
 }
+.dwf-artifact-actions {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.dwf-artifact-action-link {
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* Markdown renders naturally in the pane without nested scrollbars slicing lines in half */
+.dwf-artifact-markdown {
+  padding: 2px 2px 0;
+  overflow-x: auto;
+}
+.dwf-artifact-markdown-clamped {
+  position: relative;
+  max-height: 500px;
+  overflow: hidden;
+}
+.dwf-artifact-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 74px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 4px;
+  background: linear-gradient(to bottom, transparent, var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1)) 76%);
+}
+.dwf-artifact-text {
+  max-height: 420px;
+  overflow: auto;
+}
+.dwf-artifact-image { max-width: 100%; border-radius: 6px; }
 
 /* ——— script steps ——— */
 .dwf-steps {
@@ -877,13 +1491,14 @@
 /* ——— per-subagent changes ——— */
 .dwf-changes-agent + .dwf-changes-agent { margin-top: 2px; }
 .dwf-changes-head {
+  --dwf-pill-bg: var(--dsw-alias-bg-mask-1);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 7px 10px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-bg-mask-1);
+  background: var(--dwf-pill-bg);
 }
 .dwf-changes-actor {
   display: inline-flex;
@@ -899,13 +1514,6 @@
 }
 @media (hover: hover) {
   .dwf-changes-actor:hover { color: var(--dsw-alias-link, var(--dsw-alias-state-business-primary)); }
-}
-.dwf-changes-actor-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--dsw-alias-state-business-primary);
-  flex: none;
 }
 .dwf-changes-file-count {
   padding: 0 6px;
@@ -1058,8 +1666,8 @@
   width: 1.25px;
   background: var(--dsw-alias-border-l2);
 }
-.dwf-spine-rail-above { top: 0; height: 14px; }
-.dwf-spine-rail-below { top: 14px; bottom: 0; }
+.dwf-spine-rail-above { top: 0; height: 15px; }
+.dwf-spine-rail-below { top: 15px; bottom: 0; }
 .dwf-spine-rail-full { top: 0; bottom: 0; }
 .dwf-spine-ink-faint { background: var(--dsw-alias-border-l2); }
 .dwf-spine-ink-strong { background: var(--dsw-alias-label-tertiary); }
@@ -1078,31 +1686,36 @@
   );
 }
 .dwf-spine-lamp {
-  top: 9px;
+  top: 10px;
 }
+.dwf-spine-section[data-unreached] .dwf-spine-lamp { opacity: 0.45; }
 .dwf-spine-body {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding-bottom: 6px;
+  padding-bottom: 4px;
 }
 .dwf-spine-head {
+  --dwf-pill-bg: var(--dsw-alias-bg-base);
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
-  min-height: 28px;
-  padding: 2px 6px;
+  min-height: 30px;
+  padding: 3px 6px;
   border: 0;
   border-radius: var(--dsw-radius-sm, 8px);
   background: none;
   color: var(--dsw-alias-label-primary);
-  font: var(--dsw-font-xxs-strong-12, 600 12px/18px sans-serif);
+  font: var(--dsw-font-xs-strong-13, 600 12.5px/18px sans-serif);
   text-align: left;
   cursor: pointer;
 }
 @media (hover: hover) {
-  .dwf-spine-head:hover { background: var(--dsw-alias-interactive-bg-hover); }
+  .dwf-spine-head:hover {
+    --dwf-pill-bg: var(--dsw-alias-interactive-bg-hover);
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
 .dwf-spine-head:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, currentColor); }
 .dwf-spine-chevron {
@@ -1121,18 +1734,27 @@
 }
 .dwf-spine-section[data-status='pending'] .dwf-spine-name,
 .dwf-spine-section[data-status='static'] .dwf-spine-name { color: var(--dsw-alias-label-secondary); }
-.dwf-spine-cluster {
+.dwf-spine-right {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 7px;
   flex: none;
 }
+.dwf-spine-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.dwf-cluster-face {
+  margin-left: -2px;
+}
+.dwf-cluster-face:first-child { margin-left: 0; }
 .dwf-spine-content {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  padding: 4px 0 4px 6px;
+  padding: 4px 0 6px 4px;
 }
 .dwf-spine-pill-wrap {
   display: flex;
@@ -1141,21 +1763,22 @@
   min-width: 0;
 }
 .dwf-spine-pill {
+  --dwf-pill-bg: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1));
   width: 100%;
-  min-height: 34px;
+  min-height: 36px;
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 10px 5px 6px;
+  gap: 9px;
+  padding: 5px 10px 5px 7px;
   border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: 12px;
-  background: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1));
+  border-radius: 11px;
+  background: var(--dwf-pill-bg);
   color: var(--dsw-alias-label-primary);
   font: var(--dsw-font-xxs-12, 12px/18px sans-serif);
   text-align: left;
   min-width: 0;
-  transition: background-color 0.14s ease, border-color 0.14s ease;
+  transition: background-color 0.14s ease, border-color 0.14s ease, opacity 0.14s ease;
 }
 .dwf-spine-pill[data-status='running'] {
   border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, transparent);
@@ -1177,6 +1800,7 @@
   align-items: center;
   gap: 6px;
   font: var(--dsw-font-xxxs-11, 11px/15px sans-serif);
+  font-variant-numeric: tabular-nums;
   color: var(--dsw-alias-label-tertiary);
 }
 .dwf-spine-pill-meta:empty { display: none; }
@@ -1249,7 +1873,7 @@
 
 .dwf-metrics-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   gap: 8px;
 }
 .dwf-metrics-grid[data-pending] .dwf-metric-value {
@@ -1258,11 +1882,11 @@
 .dwf-metric-tile {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
-  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-border-l2) 70%, transparent);
+  gap: 4px;
+  padding: 9px 11px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-sm, 8px);
-  background: var(--dsw-alias-bg-mask-1);
+  background: var(--dsw-alias-bg-base, transparent);
   min-width: 0;
 }
 .dwf-metric-label {
@@ -1273,7 +1897,7 @@
   white-space: nowrap;
 }
 .dwf-metric-value {
-  font: var(--dsw-font-s-strong-14, 600 15px/20px sans-serif);
+  font: var(--dsw-font-s-strong-14, 600 15.5px/20px sans-serif);
   color: var(--dsw-alias-label-primary);
   font-variant-numeric: tabular-nums;
   word-break: break-word;

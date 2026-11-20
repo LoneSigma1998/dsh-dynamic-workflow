@@ -1577,6 +1577,9 @@ Saves a script with its metadata so it can be run again by name — through `cre
   directory, a depth. Each declaration gives a `type` (`string`, `number`,
   `boolean`, or `json` for anything else), and optionally a `description`, `required: true`
   and a `default`; every future call is validated against them.
+- `from_run_id`: provenance only — the id of the run this workflow was distilled from, when
+  saving a workflow that just ran. Pass it whenever you know it; it lets that run's card show
+  that it has been saved.
 
 The saved file is valid TypeScript: a `/* dsh-workflow` block of JSON metadata, then the
 script verbatim. The script is typechecked by the same compiler as `create_workflow`, before

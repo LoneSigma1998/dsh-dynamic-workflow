@@ -1,12 +1,9 @@
 /**
- * Right-sidebar run pane (page tab `dynamic-workflow-run`): the whole run on one surface —
- * header with status and controls, the vertical commit-graph spine (collapsible phases, parallel
- * branch tracks, 5-pill roster cap + grouped roll, each transcript one click away), open questions
- * and holes, reports, artifacts (including live preset chart/table/metrics/board dashboards),
- * per-subagent file changes, script steps, the outcome, and the script.
- *
- * Live state is the `dynamicWorkflowRuns` projection; static/durable state comes from the Host
- * route so older runs evicted from the 8-run projection window remain inspectable and resumable.
+ * Right-sidebar run pane (page tab `dynamic-workflow-run`): ZCode-parity two-row status header
+ * with `[⚙ 配置] · [💾 保存 / 再次运行] · [■ 停止运行]`, exact comma-formatted token summary bar
+ * (`☰ 3 个子代理 · 9/9 步 · 33,364,853 tokens · 2 个产物`), natural Result hint (with optional
+ * raw return-value disclosure), collapsible vertical Spine with stacked `AgentFace` clusters and
+ * per-phase ask stats, Artifacts, Subagent changes, Script steps, and Show script.
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -15,17 +12,18 @@ import type { CreateWorkflowCausalityGraph } from '../display/types.ts'
 import type { WorkflowRunState } from '../shared/runs/workflow-runs.ts'
 import type { Translate, UseProjection } from './host-types.ts'
 import { buildWorkflowTimeline } from './model/timeline/timeline-model.ts'
-import { apiGet, apiPost, findRun, formatTokens, namerOf, reconcileRun, RUNS_PROJECTION, runDot, runStatusText, shortModel, taskCounts } from './run-view.ts'
-import { RunSpine } from './RunSpine.tsx'
+import { apiGet, apiPost, findRun, formatExactTokens, formatTokens, namerOf, reconcileRun, RUNS_PROJECTION, runDot, runStatusText, shortModel, taskCounts } from './run-view.ts'
+import { RunSpine, type JournalAskNode } from './RunSpine.tsx'
+import { SaveWorkflowControls, type SavedRunRef } from './SavePopover.tsx'
 import { changedSettings, SettingsFields, type RunSettingsValue } from './Settings.tsx'
-import { ArtifactList, ChangesSection, ScriptSteps, useChanges, type ArtifactInfo } from './RunExtras.tsx'
+import { ArtifactList, ChangesSection, ScriptSteps, useChanges, type ArtifactInfo, type WorkspaceNode } from './RunExtras.tsx'
 import { WorkflowsHome } from './SavedWorkflows.tsx'
 import { readableResult } from './WorkflowToolCard.tsx'
 
 export const RUN_TAB_KIND = 'dynamic-workflow-run'
 export const RUN_TAB_ID = 'dsh-dynamic-workflow:run'
 
-export interface RunTabParams { sessionId: string; runId: string }
+export interface RunTabParams { sessionId: string; runId: string; focusArtifactId?: string }
 
 interface RunDetail {
   snapshot: {
@@ -49,9 +47,12 @@ interface RunDetail {
   }
   script: string | null
   graph: CreateWorkflowCausalityGraph | null
+  parentSessionId?: string | null
+  durationMs?: number | null
+  savedAs?: SavedRunRef | null
+  canSave?: boolean
 }
 
-/** Synthesize a `WorkflowRunState` from the durable SQLite snapshot when a run was evicted from the 8-run projection window. */
 function snapshotToRunState(runId: string, snapshot: RunDetail['snapshot']): WorkflowRunState {
   const status = (snapshot.status === 'pending' || snapshot.status === 'running' || snapshot.status === 'completed' || snapshot.status === 'errored' || snapshot.status === 'stopped')
     ? snapshot.status
@@ -120,13 +121,28 @@ export function RunPane({ t, sessionId, useProjection, useTabInfo, openChild }: 
   const tab = useTabInfo()
   const params = tab.tab.navigation.params as Partial<RunTabParams> | undefined
   const [selected, setSelected] = useState<string | undefined>(params?.runId)
-  useEffect(() => { if (params?.runId !== undefined) setSelected(params.runId) }, [params?.runId, tab.tab.navigation.revision])
+  const [focusArtifactId, setFocusArtifactId] = useState<string | undefined>(params?.focusArtifactId)
+  useEffect(() => {
+    if (params?.runId !== undefined) setSelected(params.runId)
+    setFocusArtifactId(params?.focusArtifactId)
+  }, [params?.runId, params?.focusArtifactId, tab.tab.navigation.revision])
   const runs = useProjection(RUNS_PROJECTION, state => state?.runs)
   const run = useProjection(RUNS_PROJECTION, state => findRun(state, { runId: selected }))
   if (selected === undefined) {
     return <RunList runs={runs ?? []} t={t} onSelect={setSelected} missing={false} sessionId={sessionId} />
   }
-  return <RunDetailView runId={selected} run={run} t={t} sessionId={sessionId} openChild={openChild} onBack={() => setSelected(undefined)} />
+  return (
+    <RunDetailView
+      runId={selected}
+      run={run}
+      focusArtifactId={focusArtifactId}
+      t={t}
+      sessionId={sessionId}
+      openChild={openChild}
+      onBack={() => setSelected(undefined)}
+      onSelectRun={nextId => setSelected(nextId === '' ? undefined : nextId)}
+    />
+  )
 }
 
 interface SessionRunRow {
@@ -183,7 +199,7 @@ function RunList({ runs, t, onSelect, missing, sessionId }: { runs: readonly Wor
                     <span className="dwf-run-list-sub">
                       <code className="dwf-run-list-id">{item.runId.replace(/^dwfrun-/u, '').slice(0, 8)}</code>
                       <span>{item.statusText}</span>
-                      {item.tokens > 0 ? <span>{formatTokens(item.tokens)}</span> : null}
+                      {item.tokens > 0 ? <span title={`${formatExactTokens(item.tokens)} tokens`}>{formatTokens(item.tokens)} tokens</span> : null}
                     </span>
                   </span>
                   <span className="dwf-run-list-arrow" aria-hidden>›</span>
@@ -198,24 +214,60 @@ function RunList({ runs, t, onSelect, missing, sessionId }: { runs: readonly Wor
   )
 }
 
-function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId: string; run: WorkflowRunState | undefined; t: Translate; sessionId: string; openChild: (id: string) => void; onBack: () => void }) {
+function RunDetailView({
+  runId,
+  run: projected,
+  focusArtifactId,
+  t,
+  sessionId,
+  openChild,
+  onBack,
+  onSelectRun,
+}: {
+  runId: string
+  run: WorkflowRunState | undefined
+  focusArtifactId?: string | undefined
+  t: Translate
+  sessionId: string
+  openChild: (id: string) => void
+  onBack: () => void
+  onSelectRun: (runId: string) => void
+}) {
   const [detail, setDetail] = useState<RunDetail | null | undefined>(undefined)
+  const [allNodes, setAllNodes] = useState<(WorkspaceNode & JournalAskNode)[] | undefined>(undefined)
+  const [savedOverride, setSavedOverride] = useState<SavedRunRef | null | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [scriptOpen, setScriptOpen] = useState(false)
+  const [rawResultOpen, setRawResultOpen] = useState(false)
   const names = useMemo(() => namerOf(t), [t])
   const status = projected?.status
   const filled = projected?.holes?.filter(hole => hole.state === 'filled').length ?? 0
   const artifactKey = (projected?.artifacts ?? []).map(a => `${a.id}@${a.version}`).join(',')
   const [refresh, setRefresh] = useState(0)
   const [notice, setNotice] = useState<string | undefined>(undefined)
-  // a different run: drop the previous run's static half before the new one loads
-  useEffect(() => { setDetail(undefined); setNotice(undefined) }, [runId])
+
+  useEffect(() => {
+    setDetail(undefined)
+    setAllNodes(undefined)
+    setSavedOverride(undefined)
+    setNotice(undefined)
+    setRawResultOpen(false)
+  }, [runId])
+
+  const nodesRevision = `${status ?? ''}:${projected?.usage.nodesUsed ?? 0}:${filled}:${refresh}`
   useEffect(() => {
     const controller = new AbortController()
     apiGet<RunDetail>(`runs/${encodeURIComponent(runId)}`, controller.signal).then(setDetail, () => { if (!controller.signal.aborted) setDetail(null) })
     return () => controller.abort()
-    // refresh the static half when the run settles, a hole is filled, or a new artifact version is published
   }, [runId, status, filled, artifactKey, refresh])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    apiGet<{ nodes: (WorkspaceNode & JournalAskNode)[] }>(`runs/${encodeURIComponent(runId)}/nodes`, controller.signal)
+      .then(v => setAllNodes(v.nodes), () => undefined)
+    return () => controller.abort()
+  }, [runId, nodesRevision])
+
   const run = useMemo(() => {
     if (projected !== undefined) return reconcileRun(projected, detail?.snapshot ?? undefined)
     if (detail !== undefined && detail !== null) return snapshotToRunState(runId, detail.snapshot)
@@ -230,6 +282,10 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
       return live === undefined ? artifact : { ...artifact, itemCount: live.itemCount }
     })
   }, [detail, projected?.artifacts])
+
+  const askNodes = useMemo(() => allNodes?.filter(n => n.kind === 'ask'), [allNodes])
+  const workspaceNodes = useMemo(() => allNodes?.filter(n => n.kind !== 'ask'), [allNodes])
+
   const control = async (action: 'stop' | 'resume'): Promise<void> => {
     setBusy(true)
     try {
@@ -239,7 +295,6 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
       setNotice(String(error))
     } finally { setBusy(false); setRefresh(value => value + 1) }
   }
-  /** In-place retune of this run's own bound (ZCode's run settings): the shared governor still caps it. */
   const retune = async (delta: number): Promise<void> => {
     const current = run?.concurrency?.limit ?? run?.concurrency?.ceiling ?? run?.concurrency?.cap ?? 4
     setBusy(true)
@@ -251,9 +306,10 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
     } finally { setBusy(false) }
   }
   const counts = run === undefined ? undefined : taskCounts(run)
-  const changes = useChanges(runId, `${run?.status ?? ''}:${run?.usage.nodesUsed ?? 0}:${filled}:${refresh}`)
+  const changes = useChanges(runId, nodesRevision)
   const changedBySession = new Map((changes ?? []).map(entry => [entry.sessionId, entry.files.length]))
-  // Configure (ZCode's popover): a GUI revision of the settings, no model turn and no confirmation
+  const totalChangedFiles = (changes ?? []).reduce((sum, entry) => sum + entry.files.length, 0)
+
   const configurable = run !== undefined && (run.status === 'running' || run.status === 'errored' || (run.status === 'stopped' && run.stopReason !== 'superseded'))
   const currentSettings: RunSettingsValue | undefined = run === undefined ? undefined : {
     maxConcurrency: run.concurrency?.limit ?? run.concurrency?.ceiling ?? run.concurrency?.cap ?? 4,
@@ -277,6 +333,7 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
       setNotice(String(error))
     } finally { setBusy(false); setRefresh(value => value + 1) }
   }
+
   if (detail === null && projected === undefined) {
     return (
       <div className="dwf-pane">
@@ -288,24 +345,96 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
       </div>
     )
   }
+
+  const savedAs = savedOverride !== undefined ? savedOverride : detail?.savedAs
+  const canSave = detail?.canSave === true && (run?.status === 'completed' || (savedAs !== null && savedAs !== undefined))
+  const cancellable = run?.status === 'running'
+  const agentsCount = run?.actors.length ?? 0
+  const spentTokens = Math.max(run?.usage.spentTokens ?? 0, detail?.snapshot.spentTokens ?? 0)
   const unattributedQuestions = (run?.pendingQuestions ?? []).filter(q => model === undefined || q.actorSiteId === undefined || q.actorOrdinal === undefined)
+
+  // Summary line (ZCode parity: `☰ 7 个子代理 · 16/16 步 · 23,695,436 tokens · 2 个产物`)
+  const summaryParts: string[] = []
+  if (agentsCount > 0) summaryParts.push(t('card.agents', { count: agentsCount }))
+  if (counts !== undefined && counts.total > 0) summaryParts.push(t('pane.summary.steps', counts))
+  summaryParts.push(t('card.tokens', { tokens: formatExactTokens(spentTokens) }))
+  if (artifacts.length > 0) summaryParts.push(t('pane.summary.artifacts', { count: artifacts.length }))
+  if (totalChangedFiles > 0) summaryParts.push(t('changes.count', { count: totalChangedFiles }))
+
   return (
     <div className="dwf-pane" data-run-status={run?.status ?? 'unknown'}>
-      <div className="dwf-pane-head">
-        <button type="button" className="dwf-icon-btn" aria-label={t('confirm.back')} onClick={onBack}>←</button>
-        <h3 className="dwf-pane-title" title={runId}>{detail?.snapshot.name ?? runId}</h3>
-        {run !== undefined ? (
-          <span className="dwf-card-status">
-            <StateDot state={runDot(run)} size={12} />
-            {run.status === 'running' ? <TextShimmer active>{runStatusText(run, t)}</TextShimmer> : <span>{runStatusText(run, t)}</span>}
+      {/* ZCode-style 2-row status & controls header */}
+      <div className="dwf-pane-header-block">
+        <div className="dwf-pane-top-row">
+          <button type="button" className="dwf-icon-btn" aria-label={t('confirm.back')} onClick={onBack}>←</button>
+          <h3 className="dwf-pane-title" title={runId}>{detail?.snapshot.name ?? runId}</h3>
+          <span className="dwf-card-actions">
+            {configurable && configuring === undefined ? (
+              <button type="button" className="dwf-action-pill" disabled={busy} onClick={() => setConfiguring(currentSettings)}>
+                {t('pane.configure')}
+              </button>
+            ) : null}
+            {run?.status === 'stopped' && run.resumable === true ? (
+              <Button size="sm" variant="outline" icon={<IconRefreshOutlineRegular size={12} />} disabled={busy} onClick={() => { void control('resume') }}>
+                {t('card.resume')}
+              </Button>
+            ) : null}
+            {canSave ? (
+              <SaveWorkflowControls
+                runId={runId}
+                runName={detail?.snapshot.name}
+                sessionId={detail?.parentSessionId ?? sessionId}
+                savedAs={savedAs}
+                t={t}
+                onSaved={saved => setSavedOverride(saved)}
+                onOpenRun={onSelectRun}
+              />
+            ) : null}
+            <button
+              type="button"
+              className="dwf-action-pill"
+              disabled={!cancellable || busy}
+              onClick={() => { void control('stop') }}
+              data-dwf-stop-btn=""
+            >
+              <IconStopFillRegular size={11} />
+              <span>{t('pane.stopRun')}</span>
+            </button>
           </span>
+        </div>
+
+        {run !== undefined ? (
+          <div className="dwf-pane-status-row">
+            <span className="dwf-pane-status-word" data-status={run.status}>
+              <StateDot state={runDot(run)} size={10} />
+              {run.status === 'running' ? <TextShimmer active>{runStatusText(run, t)}</TextShimmer> : <span>{runStatusText(run, t)}</span>}
+            </span>
+            {run.concurrency !== undefined && run.status === 'running' ? (
+              <span className="dwf-retune">
+                <span>{t('card.concurrency', { value: Math.min(run.concurrency.cap, run.concurrency.limit ?? run.concurrency.cap) })}</span>
+                <button type="button" className="dwf-step" aria-label={t('pane.concurrency.down')} disabled={busy} onClick={() => { void retune(-2) }}>−</button>
+                <button type="button" className="dwf-step" aria-label={t('pane.concurrency.up')} disabled={busy} onClick={() => { void retune(2) }}>+</button>
+              </span>
+            ) : null}
+            {run.subagentModel !== undefined ? (
+              <span className="dwf-pane-model-chip" title={run.subagentModel}>{shortModel(run.subagentModel)}</span>
+            ) : null}
+          </div>
         ) : null}
-        <span className="dwf-card-actions">
-          {run?.status === 'running' ? <Button size="sm" variant="ghost" icon={<IconStopFillRegular size={12} />} disabled={busy} onClick={() => { void control('stop') }}>{t('card.stop')}</Button> : null}
-          {run?.status === 'stopped' && run.resumable === true ? <Button size="sm" variant="ghost" icon={<IconRefreshOutlineRegular size={12} />} disabled={busy} onClick={() => { void control('resume') }}>{t('card.resume')}</Button> : null}
-          {configurable && configuring === undefined ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfiguring(currentSettings)}>{t('pane.configure')}</Button> : null}
-        </span>
+
+        {run !== undefined ? (
+          <div className="dwf-pane-summary" data-dwf-usage="">
+            <span className="dwf-pane-summary-icon" aria-hidden>☰</span>
+            {summaryParts.map((part, idx) => (
+              <span key={idx} className="dwf-pane-summary-item">
+                {idx > 0 ? <span className="dwf-pane-dot" aria-hidden>·</span> : null}
+                <span>{part}</span>
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
+
       {configuring !== undefined && currentSettings !== undefined ? (
         <div className="dwf-configure" data-dwf-configure="">
           <SettingsFields value={configuring} original={currentSettings} onChange={setConfiguring} t={t} disabled={busy} />
@@ -316,26 +445,45 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
           </div>
         </div>
       ) : null}
-      {run !== undefined ? (
-        <div className="dwf-card-meta">
-          {counts !== undefined && counts.total > 0 ? <span>{t('card.tasks', counts)}</span> : null}
-          <span>{t('card.tokens', { tokens: formatTokens(run.usage.spentTokens) })}</span>
-          {run.concurrency !== undefined ? (
-            <span className="dwf-retune">
-              {t('card.concurrency', { value: Math.min(run.concurrency.cap, run.concurrency.limit ?? run.concurrency.cap) })}
-              {run.status === 'running' ? (
-                <>
-                  <button type="button" className="dwf-step" aria-label={t('pane.concurrency.down')} disabled={busy} onClick={() => { void retune(-2) }}>−</button>
-                  <button type="button" className="dwf-step" aria-label={t('pane.concurrency.up')} disabled={busy} onClick={() => { void retune(2) }}>+</button>
-                </>
-              ) : null}
-            </span>
-          ) : null}
-          {run.subagentModel !== undefined ? <span title={run.subagentModel}>{t('card.model', { model: shortModel(run.subagentModel) })}</span> : null}
-        </div>
-      ) : null}
+
       {notice !== undefined ? <p className="dwf-attention">{notice}</p> : null}
-      {model !== undefined ? <RunSpine model={model} run={run} names={names} t={t} openChild={openChild} changedBySession={changedBySession} /> : null}
+
+      {/* Natural Result / Error banner (ZCode parity: never dump raw JSON uninvited) */}
+      {run?.status === 'completed' ? (
+        <section className="dwf-pane-result-bar">
+          <div className="dwf-pane-result-head">
+            <span className="dwf-pane-result-label">{t('card.result')}</span>
+            {run.resultPreview !== undefined ? (
+              <button type="button" className="dwf-link dwf-raw-toggle" onClick={() => setRawResultOpen(v => !v)}>
+                {rawResultOpen ? t('pane.result.hideRaw') : t('pane.result.showRaw')}
+              </button>
+            ) : null}
+          </div>
+          <p className="dwf-pane-result-hint">{t('pane.result.completedHint')}</p>
+          {rawResultOpen && run.resultPreview !== undefined ? (
+            <pre className="dwf-code dwf-pane-result">{readableResult(run.resultPreview)}</pre>
+          ) : null}
+        </section>
+      ) : null}
+      {run !== undefined && run.error !== undefined && run.status !== 'completed' ? (
+        <section className="dwf-pane-section">
+          <h4>{t('card.error')}</h4>
+          <pre className="dwf-code dwf-outcome-error">{run.error}</pre>
+        </section>
+      ) : null}
+
+      {model !== undefined ? (
+        <RunSpine
+          model={model}
+          graph={detail?.graph}
+          run={run}
+          askNodes={askNodes}
+          names={names}
+          t={t}
+          openChild={openChild}
+          changedBySession={changedBySession}
+        />
+      ) : null}
 
       {unattributedQuestions.length > 0 ? (
         <section className="dwf-pane-section">
@@ -350,18 +498,13 @@ function RunDetailView({ runId, run: projected, t, openChild, onBack }: { runId:
         </section>
       ) : null}
 
-      {run?.status === 'completed' && run.resultPreview !== undefined ? (
-        <section className="dwf-pane-section"><h4>{t('card.result')}</h4><pre className="dwf-code dwf-pane-result">{readableResult(run.resultPreview)}</pre></section>
+      {artifacts.length > 0 ? (
+        <ArtifactList runId={runId} artifacts={artifacts} focusArtifactId={focusArtifactId} t={t} />
       ) : null}
-      {run !== undefined && run.error !== undefined && run.status !== 'completed' ? (
-        <section className="dwf-pane-section"><h4>{t('card.error')}</h4><pre className="dwf-code dwf-outcome-error">{run.error}</pre></section>
-      ) : null}
-      {(run?.reports?.length ?? 0) > 0 ? (
-        <section className="dwf-pane-section"><h4>{t('pane.reports')}</h4><ul className="dwf-reports">{run!.reports!.map((r, i) => <li key={`${r.siteId}@${r.ordinal}:${i}`}>{r.preview}</li>)}</ul></section>
-      ) : null}
-      {artifacts.length > 0 ? <ArtifactList runId={runId} artifacts={artifacts} t={t} /> : null}
+
       <ChangesSection runId={runId} changes={changes} t={t} openChild={openChild} />
-      <ScriptSteps runId={runId} revision={`${run?.status ?? ''}:${run?.usage.nodesUsed ?? 0}:${filled}:${refresh}`} t={t} />
+      <ScriptSteps nodes={workspaceNodes} t={t} />
+
       {detail?.script !== undefined && detail.script !== null ? (
         <section className="dwf-pane-section">
           <button type="button" className="dwf-disclosure-btn" aria-expanded={scriptOpen} onClick={() => setScriptOpen(open => !open)}>

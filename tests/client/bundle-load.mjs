@@ -60,6 +60,8 @@ const cssText = Object.values(stylesheets).map(s => s.text({ asset: x => x })).j
 assert.ok(cssText.includes('.dwf-timeline'), 'stylesheet text delivered through meta')
 assert.ok(cssText.includes('.dwf-spine'), 'vertical spine styles included in client bundle')
 assert.ok(cssText.includes('.dwf-preset-chart'), 'preset dashboard artifact styles included in client bundle')
+assert.ok(cssText.includes('.wf-face'), 'ZCode AgentFace tile styles included in client bundle')
+assert.ok(cssText.includes('.dwf-save-popover'), 'Save & Distill popover styles included in client bundle')
 const exportsObject = registration.factory(Object.assign((spec) => {
   required.add(spec)
   if (!PLATFORM.has(spec)) throw new Error(`require("${spec}") missed the module table`)
